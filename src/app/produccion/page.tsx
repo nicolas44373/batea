@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -28,6 +28,8 @@ function ProduccionContent() {
   const [userId, setUserId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Produccion | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [detalleProduccion, setDetalleProduccion] = useState<Produccion | null>(null);
+  const printRef = useRef<HTMLDivElement>(null);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -214,11 +216,16 @@ function ProduccionContent() {
                 key: "acciones",
                 header: "",
                 render: (p) => (
-                  <AdminOnly>
-                    <Button size="sm" variant="danger" onClick={() => setDeleteTarget(p)}>
-                      Eliminar
+                  <div className="flex gap-1 justify-end">
+                    <Button size="sm" variant="ghost" onClick={() => setDetalleProduccion(p)}>
+                      Ver
                     </Button>
-                  </AdminOnly>
+                    <AdminOnly>
+                      <Button size="sm" variant="danger" onClick={() => setDeleteTarget(p)}>
+                        Eliminar
+                      </Button>
+                    </AdminOnly>
+                  </div>
                 ),
               },
             ]}
@@ -233,6 +240,22 @@ function ProduccionContent() {
         loading={deleting}
         message="¿Eliminar este registro de producción? Los movimientos de stock asociados también se verán afectados."
       />
+
+      {/* Modal detalle / impresión */}
+      {detalleProduccion && (
+        <Modal
+          open={!!detalleProduccion}
+          onClose={() => setDetalleProduccion(null)}
+          title="Resumen de producción"
+          size="md"
+        >
+          <ResumenProduccion
+            produccion={detalleProduccion}
+            printRef={printRef}
+            onClose={() => setDetalleProduccion(null)}
+          />
+        </Modal>
+      )}
 
       {/* Modal registro */}
       <Modal
@@ -252,6 +275,170 @@ function ProduccionContent() {
           />
         )}
       </Modal>
+    </div>
+  );
+}
+
+// ── Componente de resumen imprimible ─────────────────────────────────────
+function ResumenProduccion({
+  produccion: p,
+  printRef,
+  onClose,
+}: {
+  produccion: Produccion;
+  printRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+}) {
+  const cortesFull = [
+    { key: "pata_muslo", label: "Pata/Muslo" },
+    { key: "pechuga",    label: "Filet fresco" },
+    { key: "alitas",     label: "Alitas" },
+    { key: "carcasa",    label: "Carcasa" },
+    { key: "menudos",    label: "Menudos" },
+    { key: "otros",      label: "Otros" },
+  ] as const;
+
+  const peso_estimado = p.orden?.peso_estimado ?? 0;
+
+  function handlePrint() {
+    const content = printRef.current;
+    if (!content) return;
+    const win = window.open("", "_blank", "width=800,height=600");
+    if (!win) return;
+    win.document.write(`
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="UTF-8"/>
+        <title>Resumen de Producción</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: Arial, sans-serif; font-size: 13px; color: #111; padding: 24px; }
+          h1 { font-size: 18px; margin-bottom: 4px; }
+          .sub { color: #555; font-size: 12px; margin-bottom: 16px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+          .stat { border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+          .stat-label { font-size: 10px; text-transform: uppercase; color: #888; }
+          .stat-value { font-size: 20px; font-weight: bold; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th { background: #f3f4f6; text-align: left; padding: 7px 10px; font-size: 11px; text-transform: uppercase; color: #666; }
+          td { padding: 7px 10px; border-top: 1px solid #eee; }
+          .bar-bg { background: #e5e7eb; border-radius: 4px; height: 8px; width: 100%; }
+          .bar-fill { background: #2563eb; border-radius: 4px; height: 8px; }
+          .alerta { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 8px 12px; margin-top: 12px; font-size: 12px; }
+          .footer { margin-top: 20px; font-size: 11px; color: #aaa; text-align: right; }
+        </style>
+      </head>
+      <body>
+        ${content.innerHTML}
+        <div class="footer">Generado: ${new Date().toLocaleString("es-AR")}</div>
+      </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); }, 400);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Contenido imprimible */}
+      <div ref={printRef}>
+        {/* Encabezado */}
+        <div className="mb-4">
+          <h1 className="text-base font-bold text-gray-900">Resumen de Producción</h1>
+          <p className="text-xs text-gray-500">
+            {formatFechaHora(p.fecha_produccion)} — Lote: {p.orden?.lote?.marca ?? "—"}
+            {p.orden?.lote?.calibre ? ` · Cal. ${p.orden.lote.calibre}` : ""}
+            {p.orden?.cantidad_cajones ? ` · ${p.orden.cantidad_cajones} cajones` : ""}
+          </p>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="border border-gray-200 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Peso estimado</p>
+            <p className="text-lg font-bold text-gray-900">{peso_estimado.toFixed(1)} kg</p>
+          </div>
+          <div className="border border-gray-200 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Total producido</p>
+            <p className="text-lg font-bold text-gray-900">{p.peso_total_producido.toFixed(1)} kg</p>
+          </div>
+          <div className={`border rounded-lg p-3 text-center ${
+            p.rendimiento_real < 85 ? "border-red-300 bg-red-50"
+            : p.rendimiento_real > 105 ? "border-yellow-300 bg-yellow-50"
+            : "border-green-300 bg-green-50"
+          }`}>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Rendimiento</p>
+            <p className={`text-lg font-bold ${rendimientoColor(p.rendimiento_real)}`}>
+              {p.rendimiento_real?.toFixed(1)}%
+            </p>
+          </div>
+        </div>
+
+        {/* Tabla de cortes */}
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Corte</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Kilos</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">% del total</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">% sobre est.</th>
+              <th className="px-3 py-2 w-24 hidden sm:table-cell"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cortesFull.map((corte) => {
+              const kilos = (p[corte.key as keyof Produccion] as number) ?? 0;
+              const pctTotal = p.peso_total_producido > 0 ? (kilos / p.peso_total_producido) * 100 : 0;
+              const pctEst   = peso_estimado > 0 ? (kilos / peso_estimado) * 100 : 0;
+              return (
+                <tr key={corte.key} className="border-t border-gray-100">
+                  <td className="px-3 py-2.5 font-medium text-gray-800">{corte.label}</td>
+                  <td className="px-3 py-2.5 text-right font-mono font-semibold">{kilos.toFixed(3)} kg</td>
+                  <td className="px-3 py-2.5 text-right text-gray-600">{pctTotal.toFixed(1)}%</td>
+                  <td className="px-3 py-2.5 text-right text-gray-600">{pctEst.toFixed(1)}%</td>
+                  <td className="px-3 py-2.5 hidden sm:table-cell">
+                    <div className="w-full bg-gray-100 rounded-full h-2">
+                      <div
+                        className="bg-brand-500 h-2 rounded-full"
+                        style={{ width: `${Math.min(pctTotal, 100)}%` }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {/* Total */}
+            <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+              <td className="px-3 py-2.5 text-gray-900">TOTAL</td>
+              <td className="px-3 py-2.5 text-right font-mono">{p.peso_total_producido.toFixed(3)} kg</td>
+              <td className="px-3 py-2.5 text-right">100%</td>
+              <td className="px-3 py-2.5 text-right">{p.rendimiento_real?.toFixed(1)}%</td>
+              <td className="hidden sm:table-cell" />
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Alerta si hay */}
+        {p.tiene_alerta && p.alerta_detalle && (
+          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
+            <span className="font-semibold">⚠ Alerta: </span>{p.alerta_detalle}
+          </div>
+        )}
+      </div>
+
+      {/* Botones */}
+      <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+        <Button variant="outline" onClick={onClose}>Cerrar</Button>
+        <Button onClick={handlePrint}>
+          <svg className="w-4 h-4 mr-1.5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          Imprimir
+        </Button>
+      </div>
     </div>
   );
 }
