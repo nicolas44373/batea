@@ -1,0 +1,7 @@
+{
+  "/stock/page": "app/stock/page.js",
+  "/produccion/supremas/page": "app/produccion/supremas/page.js",
+  "/ventas/page": "app/ventas/page.js",
+  "/configuracion/precios/page": "app/configuracion/precios/page.js",
+  "/produccion/page": "app/produccion/page.js"
+}
