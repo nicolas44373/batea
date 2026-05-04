@@ -58,10 +58,11 @@ export function OrdenDesposteForm({ usuarioId, onSuccess }: OrdenDesposteFormPro
     }
   }, [loteId, lotes]);
 
-  const pesoEstimado =
-    selectedLote && cantCajones
-      ? ((selectedLote.peso_total / selectedLote.cantidad_cajones) * cantCajones).toFixed(2)
-      : null;
+  const pesoEstimadoNum =
+    selectedLote && cantCajones && selectedLote.cantidad_cajones > 0
+      ? (selectedLote.peso_total / selectedLote.cantidad_cajones) * Number(cantCajones)
+      : 0;
+  const pesoEstimado = pesoEstimadoNum > 0 ? pesoEstimadoNum.toFixed(2) : null;
 
   const onSubmit = async (data: FormData) => {
     if (selectedLote && data.cantidad_cajones > selectedLote.cajones_disponibles) {
@@ -70,10 +71,17 @@ export function OrdenDesposteForm({ usuarioId, onSuccess }: OrdenDesposteFormPro
     }
     setLoading(true);
     try {
+      const lote = lotes.find((l) => l.id === data.lote_id);
+      const pesoPorCajon = lote && lote.cantidad_cajones > 0
+        ? lote.peso_total / lote.cantidad_cajones
+        : 0;
+      const peso_estimado = parseFloat((pesoPorCajon * data.cantidad_cajones).toFixed(3));
+
       await insertOrden({
         ...data,
         usuario_id: usuarioId,
         fecha_orden: new Date().toISOString().split("T")[0],
+        peso_estimado,
       });
       toast.success("Orden de desposte creada");
       reset();

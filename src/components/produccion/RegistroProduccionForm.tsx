@@ -61,8 +61,11 @@ export function RegistroProduccionForm({
   );
 
   useEffect(() => {
-    if (orden.peso_estimado && orden.peso_estimado > 0) {
-      setRendimiento(Math.round((totalProducido / orden.peso_estimado) * 1000) / 10);
+    const base = orden.peso_estimado ?? 0;
+    if (base > 0 && totalProducido > 0) {
+      setRendimiento(Math.round((totalProducido / base) * 1000) / 10);
+    } else {
+      setRendimiento(null);
     }
   }, [totalProducido, orden.peso_estimado]);
 
@@ -131,14 +134,23 @@ export function RegistroProduccionForm({
             <p className="text-xs font-medium text-gray-600">Total producido</p>
             <p className="text-2xl font-bold text-gray-900">{totalProducido.toFixed(3)} kg</p>
           </div>
-          {rendimiento !== null && (
+          {rendimiento !== null ? (
             <div>
               <p className="text-xs font-medium text-gray-600">Rendimiento</p>
               <p className={`text-2xl font-bold ${rendimientoColor(rendimiento)}`}>
                 {rendimiento}%
               </p>
               <p className="text-xs text-gray-500">
-                Esperado: 85–100% · Estimado: {formatKilos(orden.peso_estimado)}
+                Esperado: 85–100% · Base: {formatKilos(orden.peso_estimado)}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs font-medium text-gray-500">Rendimiento</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {(orden.peso_estimado ?? 0) === 0
+                  ? "Sin peso estimado en la orden"
+                  : "Ingresá los kilos producidos"}
               </p>
             </div>
           )}

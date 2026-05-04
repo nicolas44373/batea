@@ -14,17 +14,18 @@ import type { Producto } from "@/types";
 
 // Labels para productos del sistema
 const SISTEMA_LABELS: Record<string, string> = {
-  pata_muslo:          "Pata/Muslo",
-  pechuga:             "Pechuga",
-  alitas:              "Alitas",
-  carcasa:             "Carcasa",
-  menudos:             "Menudos",
-  pollo_entero:        "Pollo entero",
-  supremas:            "Supremas",
-  filet_fresco:        "Filet fresco",
-  filet_congelado:     "Filet congelado",
-  pata_muslo_fresca:   "Pata/Muslo fresca",
-  pata_muslo_congelada:"Pata/Muslo congelada",
+  filet_fresco:         "Filet fresco",
+  pata_muslo_fresca:    "Pata/Muslo fresca",
+  alitas:               "Alitas",
+  carcasa:              "Carcasa",
+  menudos:              "Menudos",
+  pollo_entero:         "Pollo entero",
+  supremas:             "Supremas",
+  filet_congelado:      "Filet congelado",
+  pata_muslo_congelada: "Pata/Muslo congelada",
+  // productos internos (no se venden normalmente)
+  pata_muslo:           "Pata/Muslo (desposte)",
+  pechuga:              "Filet fresco (desposte)",
 };
 
 const PRODUCTOS_SISTEMA = Object.keys(SISTEMA_LABELS);

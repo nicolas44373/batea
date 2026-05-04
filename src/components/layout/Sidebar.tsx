@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, resetClient } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/context/UserContext";
 import type { UserRole } from "@/types";
 
@@ -151,6 +151,7 @@ export function Sidebar({ userRole = "operario", userName, onClose }: SidebarPro
   const handleLogout = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
+    resetClient();
     router.push("/login");
     router.refresh();
   };

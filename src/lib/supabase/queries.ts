@@ -82,7 +82,7 @@ export async function getOrden(id: string): Promise<OrdenDesposte> {
 }
 
 export async function insertOrden(
-  payload: Omit<OrdenDesposte, "id" | "peso_estimado" | "estado" | "fecha_proceso" | "created_at" | "updated_at">
+  payload: Omit<OrdenDesposte, "id" | "estado" | "fecha_proceso" | "created_at" | "updated_at">
 ): Promise<OrdenDesposte> {
   const supabase = createClient();
   const { data, error } = await supabase

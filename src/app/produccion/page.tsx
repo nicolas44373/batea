@@ -178,11 +178,17 @@ function ProduccionContent() {
                 key: "rendimiento_real",
                 header: "Rendimiento",
                 align: "right",
-                render: (p) => (
-                  <span className={`font-semibold ${rendimientoColor(p.rendimiento_real)}`}>
-                    {p.rendimiento_real?.toFixed(1)}%
-                  </span>
-                ),
+                render: (p) => {
+                  const r = p.rendimiento_real;
+                  if (!r || r <= 0) {
+                    return <span className="text-gray-400 text-xs">Sin datos</span>;
+                  }
+                  return (
+                    <span className={`font-semibold ${rendimientoColor(r)}`}>
+                      {r.toFixed(1)}%
+                    </span>
+                  );
+                },
               },
               {
                 key: "tiene_alerta",
@@ -365,13 +371,14 @@ function ResumenProduccion({
             <p className="text-lg font-bold text-gray-900">{p.peso_total_producido.toFixed(1)} kg</p>
           </div>
           <div className={`border rounded-lg p-3 text-center ${
-            p.rendimiento_real < 85 ? "border-red-300 bg-red-50"
+            !p.rendimiento_real || p.rendimiento_real <= 0 ? "border-gray-200 bg-gray-50"
+            : p.rendimiento_real < 85 ? "border-red-300 bg-red-50"
             : p.rendimiento_real > 105 ? "border-yellow-300 bg-yellow-50"
             : "border-green-300 bg-green-50"
           }`}>
             <p className="text-xs text-gray-500 uppercase tracking-wide">Rendimiento</p>
-            <p className={`text-lg font-bold ${rendimientoColor(p.rendimiento_real)}`}>
-              {p.rendimiento_real?.toFixed(1)}%
+            <p className={`text-lg font-bold ${p.rendimiento_real && p.rendimiento_real > 0 ? rendimientoColor(p.rendimiento_real) : "text-gray-400"}`}>
+              {p.rendimiento_real && p.rendimiento_real > 0 ? `${p.rendimiento_real.toFixed(1)}%` : "—"}
             </p>
           </div>
         </div>
@@ -414,7 +421,9 @@ function ResumenProduccion({
               <td className="px-3 py-2.5 text-gray-900">TOTAL</td>
               <td className="px-3 py-2.5 text-right font-mono">{p.peso_total_producido.toFixed(3)} kg</td>
               <td className="px-3 py-2.5 text-right">100%</td>
-              <td className="px-3 py-2.5 text-right">{p.rendimiento_real?.toFixed(1)}%</td>
+              <td className="px-3 py-2.5 text-right">
+                {p.rendimiento_real && p.rendimiento_real > 0 ? `${p.rendimiento_real.toFixed(1)}%` : "—"}
+              </td>
               <td className="hidden sm:table-cell" />
             </tr>
           </tbody>

@@ -11,18 +11,28 @@ import { formatKilos, formatMoneda } from "@/lib/utils";
 import type { Producto, VStockActual } from "@/types";
 
 const PRODUCTO_LABELS: Record<string, string> = {
-  pata_muslo: "Pata/Muslo",
-  pechuga: "Pechuga",
-  alitas: "Alitas",
-  carcasa: "Carcasa",
-  menudos: "Menudos",
-  pollo_entero: "Pollo entero",
-  supremas: "Supremas",
-  filet_fresco: "Filet fresco",
-  filet_congelado: "Filet congelado",
+  filet_fresco:      "Filet fresco",
   pata_muslo_fresca: "Pata/Muslo fresca",
-  pata_muslo_congelada: "Pata/Muslo congelada",
+  alitas:            "Alitas",
+  carcasa:           "Carcasa",
+  menudos:           "Menudos",
+  pollo_entero:      "Pollo entero",
+  supremas:          "Supremas",
+  // compatibilidad con registros viejos
+  pata_muslo:        "Pata/Muslo",
+  pechuga:           "Filet fresco (desposte)",
 };
+
+// Productos que aparecen en la selección manual (solo los de batea)
+const PRODUCTOS_BATEA_VENTA = new Set([
+  "filet_fresco",
+  "pata_muslo_fresca",
+  "alitas",
+  "carcasa",
+  "menudos",
+  "pollo_entero",
+  "supremas",
+]);
 
 interface CartItem {
   producto: Producto;
@@ -318,31 +328,47 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         <div className="space-y-2">
           <p className="text-xs font-medium text-gray-600">Seleccioná un producto:</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {stock.filter((s) => s.kilos > 0).map((s) => (
-              <button
-                key={s.producto_id}
-                type="button"
-                onClick={() => {
-                  const prod: Producto = {
-                    id: s.producto_id,
-                    nombre: s.producto,
-                    unidad: "kg",
-                    activo: true,
-                    created_at: "",
-                  };
-                  setScanResult(prod);
-                  setScanKilos("");
-                  setScanPrecio("");
-                  setScannerMode(true);
-                }}
-                className="flex flex-col text-left p-3 rounded-lg border border-gray-200 hover:border-brand-400 hover:bg-brand-50 transition-all"
-              >
-                <span className="text-sm font-semibold text-gray-900">
-                  {PRODUCTO_LABELS[s.producto] ?? s.producto}
-                </span>
-                <span className="text-xs text-green-700">{formatKilos(s.kilos)}</span>
-              </button>
-            ))}
+            {stock
+              .filter((s) => s.kilos > 0 && PRODUCTOS_BATEA_VENTA.has(s.producto))
+              .sort((a, b) => {
+                // Filet fresco y Pata/Muslo fresca primero
+                const orden = ["filet_fresco", "pata_muslo_fresca"];
+                const ia = orden.indexOf(a.producto);
+                const ib = orden.indexOf(b.producto);
+                if (ia !== -1 && ib !== -1) return ia - ib;
+                if (ia !== -1) return -1;
+                if (ib !== -1) return 1;
+                return 0;
+              })
+              .map((s) => (
+                <button
+                  key={s.producto_id}
+                  type="button"
+                  onClick={() => {
+                    const prod: Producto = {
+                      id: s.producto_id,
+                      nombre: s.producto,
+                      unidad: "kg",
+                      activo: true,
+                      created_at: "",
+                    };
+                    setScanResult(prod);
+                    setScanKilos("");
+                    setScanPrecio("");
+                    setScannerMode(true);
+                  }}
+                  className={`flex flex-col text-left p-3 rounded-lg border transition-all
+                    ${["filet_fresco","pata_muslo_fresca"].includes(s.producto)
+                      ? "border-brand-300 bg-brand-50 hover:border-brand-500"
+                      : "border-gray-200 hover:border-brand-400 hover:bg-brand-50"
+                    }`}
+                >
+                  <span className="text-sm font-semibold text-gray-900">
+                    {PRODUCTO_LABELS[s.producto] ?? s.producto}
+                  </span>
+                  <span className="text-xs text-green-700 font-medium">{formatKilos(s.kilos)} disp.</span>
+                </button>
+              ))}
           </div>
         </div>
       )}

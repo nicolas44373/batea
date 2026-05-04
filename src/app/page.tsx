@@ -27,13 +27,21 @@ import {
 import type { LoteCajones, VAlertasProduccion, VStockActual, Venta } from "@/types";
 
 const PRODUCTO_LABELS: Record<string, string> = {
-  pata_muslo: "Pata/Muslo",
-  pechuga: "Pechuga",
-  alitas: "Alitas",
-  carcasa: "Carcasa",
-  menudos: "Menudos",
-  pollo_entero: "Pollo entero",
+  filet_fresco:      "Filet fresco",
+  pata_muslo_fresca: "Pata/Muslo fresca",
+  alitas:            "Alitas",
+  carcasa:           "Carcasa",
+  menudos:           "Menudos",
+  pollo_entero:      "Pollo entero",
+  supremas:          "Supremas",
+  pata_muslo:        "Pata/Muslo",
+  pechuga:           "Filet fresco (desposte)",
 };
+
+const PRODUCTOS_BATEA = new Set([
+  "filet_fresco", "pata_muslo_fresca", "alitas",
+  "carcasa", "menudos", "pollo_entero", "supremas",
+]);
 
 export default function DashboardPage() {
   const [stock, setStock] = useState<VStockActual[]>([]);
@@ -57,10 +65,11 @@ export default function DashboardPage() {
   const ventasHoy = ventas.filter((v) => v.created_at.startsWith(hoy));
   const kilosHoy = ventasHoy.reduce((s, v) => s + (v.total_kilos ?? 0), 0);
   const montoHoy = ventasHoy.reduce((s, v) => s + (v.total_monto ?? 0), 0);
-  const totalKilosStock = stock.reduce((s, p) => s + p.kilos, 0);
+  const stockBatea = stock.filter((s) => PRODUCTOS_BATEA.has(s.producto));
+  const totalKilosStock = stockBatea.reduce((s, p) => s + p.kilos, 0);
   const lotesDisponibles = lotes.filter((l) => l.cajones_disponibles > 0).length;
 
-  const stockChartData = stock.map((s) => ({
+  const stockChartData = stockBatea.map((s) => ({
     name: PRODUCTO_LABELS[s.producto] ?? s.producto,
     kilos: parseFloat(s.kilos.toFixed(2)),
     low: s.kilos < 10,

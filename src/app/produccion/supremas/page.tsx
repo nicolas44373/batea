@@ -13,9 +13,9 @@ import { formatFechaHora, formatKilos, rendimientoColor } from "@/lib/utils";
 import type { ElaboracionSupremas, VStockActual } from "@/types";
 
 const FILET_LABELS: Record<string, string> = {
-  pechuga: "Pechuga",
-  filet_fresco: "Filet fresco",
+  filet_fresco:    "Filet fresco",
   filet_congelado: "Filet congelado",
+  pechuga:         "Filet fresco (desposte)",
 };
 
 export default function SupremasPage() {
@@ -68,7 +68,7 @@ export default function SupremasPage() {
       {/* Stock disponible de materia prima */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card className="p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Pechuga</p>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Filet (desposte)</p>
           <p className={`text-2xl font-bold ${(stockPechuga?.kilos ?? 0) < 5 ? "text-red-600" : "text-gray-900"}`}>
             {(stockPechuga?.kilos ?? 0).toFixed(1)} kg
           </p>

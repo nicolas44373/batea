@@ -39,8 +39,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError) {
-        console.error("[UserContext] auth.getUser error:", authError);
-        setValue((v) => ({ ...v, loaded: true, profileError: authError.message }));
+        // AuthSessionMissingError es esperado cuando no hay sesión activa (ej: página de login).
+        // No lo mostramos como error — simplemente no hay usuario.
+        if (authError.name !== "AuthSessionMissingError") {
+          console.error("[UserContext] auth.getUser error:", authError);
+        }
+        setValue((v) => ({ ...v, loaded: true, profileError: null }));
         return;
       }
       if (!user) {
@@ -48,7 +52,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Usar maybeSingle para no lanzar error si no hay fila
       const { data: profile, error: profileError } = await supabase
         .from("usuarios")
         .select("nombre, rol")
@@ -60,8 +63,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
 
       const rol = (profile?.rol ?? "operario") as UserRole;
-
-      console.log("[UserContext] loaded → uid:", user.id, "| db_rol:", profile?.rol, "| rol_used:", rol, "| isAdmin:", rol === "admin", "| profileError:", profileError?.message ?? null);
 
       setValue({
         userId:      user.id,
@@ -75,8 +76,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     load();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setValue({
+          userId: "", userName: "", userRole: "operario",
+          isAdmin: false, loaded: true, profileError: null,
+        });
+      } else {
+        load();
+      }
     });
 
     return () => subscription.unsubscribe();

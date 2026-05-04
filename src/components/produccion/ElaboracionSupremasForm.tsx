@@ -13,9 +13,9 @@ import { formatKilos, rendimientoBg, rendimientoColor } from "@/lib/utils";
 import type { VStockActual, Usuario } from "@/types";
 
 const TIPOS_FILET = [
-  { value: "pechuga",        label: "Pechuga (desposte)" },
-  { value: "filet_fresco",   label: "Filet fresco (cajón)" },
-  { value: "filet_congelado",label: "Filet congelado (cajón)" },
+  { value: "filet_fresco",   label: "Filet fresco" },
+  { value: "pechuga",        label: "Filet fresco (desposte)" },
+  { value: "filet_congelado",label: "Filet congelado" },
 ] as const;
 
 const schema = z.object({
@@ -43,7 +43,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { tipo_filet: "pechuga" },
+    defaultValues: { tipo_filet: "filet_fresco" },
   });
 
   const tipoFilet    = watch("tipo_filet");
@@ -78,7 +78,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
         registrado_por: usuarioId,
       });
       toast.success("Elaboración de supremas registrada");
-      reset({ tipo_filet: "pechuga" });
+      reset({ tipo_filet: "filet_fresco" });
       onSuccess?.();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al registrar";
