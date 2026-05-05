@@ -67,13 +67,7 @@ export default function SupremasPage() {
 
       {/* Stock disponible de materia prima */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card className="p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Filet (desposte)</p>
-          <p className={`text-2xl font-bold ${(stockPechuga?.kilos ?? 0) < 5 ? "text-red-600" : "text-gray-900"}`}>
-            {(stockPechuga?.kilos ?? 0).toFixed(1)} kg
-          </p>
-          <p className="text-xs text-gray-400">disponible</p>
-        </Card>
+        
         <Card className="p-4">
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Filet fresco</p>
           <p className={`text-2xl font-bold ${(stockFiletF?.kilos ?? 0) < 5 ? "text-red-600" : "text-gray-900"}`}>

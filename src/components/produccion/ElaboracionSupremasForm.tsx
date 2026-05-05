@@ -14,7 +14,6 @@ import type { VStockActual, Usuario } from "@/types";
 
 const TIPOS_FILET = [
   { value: "filet_fresco",   label: "Filet fresco" },
-  { value: "pechuga",        label: "Filet fresco (desposte)" },
   { value: "filet_congelado",label: "Filet congelado" },
 ] as const;
 

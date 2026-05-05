@@ -129,7 +129,7 @@ export default function PreciosPage() {
   };
 
   // ── Crear producto personalizado ────────────────────────────────────
-  // El "nombre" interno en la DB es el slug del PLU o del nombre visible
+  // Slug estable y único: nombre + sufijo del PLU (evita 409 por "Promo pata" repetido)
   const toSlug = (str: string) =>
     str.toLowerCase().trim().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
 
@@ -137,7 +137,9 @@ export default function PreciosPage() {
     if (!newNombre.trim()) { toast.error("Ingresá el nombre del producto"); return; }
     if (!newPlu.trim())    { toast.error("Ingresá el código PLU"); return; }
 
-    const slug = toSlug(newNombre);
+    const base = toSlug(newNombre);
+    const pluPart = toSlug(newPlu.trim()) || "plu";
+    const slug = base ? `${base}_${pluPart}` : pluPart;
     if (!slug) { toast.error("El nombre no es válido"); return; }
 
     setCreating(true);
@@ -334,9 +336,16 @@ export default function PreciosPage() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm
                            focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
-              {newNombre.trim() && (
+              {(newNombre.trim() || newPlu.trim()) && (
                 <p className="text-xs text-gray-400 mt-1">
-                  Nombre interno: <code className="bg-gray-100 px-1 rounded">{toSlug(newNombre)}</code>
+                  Nombre interno:&nbsp;
+                  <code className="bg-gray-100 px-1 rounded">
+                    {(() => {
+                      const b = toSlug(newNombre);
+                      const p = toSlug(newPlu.trim()) || "plu";
+                      return b ? `${b}_${p}` : p;
+                    })()}
+                  </code>
                 </p>
               )}
             </div>

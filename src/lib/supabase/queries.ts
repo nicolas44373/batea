@@ -122,6 +122,17 @@ export async function insertProduccion(
     .select()
     .single();
   if (error) throw error;
+  /* Respaldo: el trigger SQL debería marcar la orden como completada en la misma transacción */
+  const { error: ordErr } = await supabase
+    .from("ordenes_desposte")
+    .update({
+      estado: "completada",
+      fecha_proceso: new Date().toISOString(),
+    })
+    .eq("id", data.orden_id);
+  if (ordErr) {
+    console.warn("[insertProduccion] Actualizar orden:", ordErr.message);
+  }
   return data;
 }
 
@@ -497,6 +508,13 @@ export async function getVentasPorProducto(): Promise<VVentasPorProducto[]> {
 }
 
 // ── PRODUCTOS ───────────────────────────────────────────────────────────
+function isUniqueConflict(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === "23505") return true;
+  const m = err.message?.toLowerCase() ?? "";
+  return m.includes("duplicate") || m.includes("unique");
+}
+
 export async function insertProducto(payload: {
   nombre: string;          // slug interno (único en DB)
   codigo_plu?: string;
@@ -504,7 +522,6 @@ export async function insertProducto(payload: {
 }): Promise<Producto> {
   const supabase = createClient();
 
-  // 1. Crear el producto
   const { data: prod, error: eProd } = await supabase
     .from("productos")
     .insert({ nombre: payload.nombre, unidad: "kg", activo: true,
@@ -512,13 +529,20 @@ export async function insertProducto(payload: {
               precio_venta: payload.precio_venta || null })
     .select()
     .single();
-  if (eProd) throw eProd;
+  if (eProd) {
+    if (isUniqueConflict(eProd)) {
+      throw new Error(
+        "Ya existe un producto con el mismo nombre interno o el mismo PLU. Cambiá el nombre, el PLU, o usá otro código en la balanza."
+      );
+    }
+    throw eProd;
+  }
 
-  // 2. Inicializar stock en 0
-  const { error: eStock } = await supabase
-    .from("stock_productos")
-    .insert({ producto_id: prod.id, kilos: 0 });
-  if (eStock) throw eStock;
+  const { error: eStock } = await supabase.from("stock_productos").upsert(
+    { producto_id: prod.id, kilos: 0 },
+    { onConflict: "producto_id", ignoreDuplicates: true }
+  );
+  if (eStock && !isUniqueConflict(eStock)) throw eStock;
 
   return prod;
 }
