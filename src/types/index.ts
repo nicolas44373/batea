@@ -101,6 +101,7 @@ export interface Produccion {
   orden_id: string;
   pata_muslo: number;
   pechuga: number;
+  pechuga_con_piel: number;
   alitas: number;
   carcasa: number;
   menudos: number;
@@ -275,6 +276,7 @@ export interface ProduccionForm {
   orden_id: string;
   pata_muslo: number;
   pechuga: number;
+  pechuga_con_piel: number;
   alitas: number;
   carcasa: number;
   menudos: number;

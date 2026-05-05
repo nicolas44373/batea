@@ -13,12 +13,13 @@ import { CORTES, formatKilos, rendimientoBg, rendimientoColor } from "@/lib/util
 import type { OrdenDesposte } from "@/types";
 
 const schema = z.object({
-  pata_muslo: z.coerce.number().min(0, "Debe ser >= 0"),
-  pechuga: z.coerce.number().min(0),
-  alitas: z.coerce.number().min(0),
-  carcasa: z.coerce.number().min(0),
-  menudos: z.coerce.number().min(0),
-  otros: z.coerce.number().min(0),
+  pata_muslo:       z.coerce.number().min(0, "Debe ser >= 0"),
+  pechuga:          z.coerce.number().min(0),
+  pechuga_con_piel: z.coerce.number().min(0),
+  alitas:           z.coerce.number().min(0),
+  carcasa:          z.coerce.number().min(0),
+  menudos:          z.coerce.number().min(0),
+  otros:            z.coerce.number().min(0),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -45,12 +46,13 @@ export function RegistroProduccionForm({
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      pata_muslo: 0,
-      pechuga: 0,
-      alitas: 0,
-      carcasa: 0,
-      menudos: 0,
-      otros: 0,
+      pata_muslo:       0,
+      pechuga:          0,
+      pechuga_con_piel: 0,
+      alitas:           0,
+      carcasa:          0,
+      menudos:          0,
+      otros:            0,
     },
   });
 

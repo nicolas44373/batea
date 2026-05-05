@@ -1,6 +1,6 @@
 # dependencies
 node_modules/
-
+supabase/
 # Next.js build output (Vercel lo genera solo)
 .next/
 out/

@@ -86,12 +86,13 @@ export function rendimientoBg(rendimiento: number): string {
 }
 
 export const CORTES = [
-  { key: "pata_muslo", label: "Pata/Muslo" },
-  { key: "pechuga",    label: "Filet fresco" },
-  { key: "alitas",     label: "Alitas" },
-  { key: "carcasa",    label: "Carcasa" },
-  { key: "menudos",    label: "Menudos" },
-  { key: "otros",      label: "Otros" },
+  { key: "pata_muslo",       label: "Pata/Muslo" },
+  { key: "pechuga",          label: "Filet fresco" },
+  { key: "pechuga_con_piel", label: "Pechuga c/piel" },
+  { key: "alitas",           label: "Alitas" },
+  { key: "carcasa",          label: "Carcasa" },
+  { key: "menudos",          label: "Menudos" },
+  { key: "otros",            label: "Otros" },
 ] as const;
 
 // Calibres de pollo entero: cantidad de pollos por cajón
