@@ -17,6 +17,7 @@ import type { MovimientoStock, VStockActual } from "@/types";
 const PRODUCTO_LABELS: Record<string, string> = {
   filet_fresco:      "Filet fresco",
   pata_muslo_fresca: "Pata/Muslo fresca",
+  pechuga_con_piel:  "Pechuga c/piel",
   alitas:            "Alitas",
   carcasa:           "Carcasa",
   menudos:           "Menudos",

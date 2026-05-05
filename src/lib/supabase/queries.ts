@@ -10,6 +10,9 @@ import type {
   VAlertasProduccion,
   ElaboracionSupremas,
   Producto,
+  MarcaConfiguracion,
+  VRentabilidadLote,
+  VVentasPorProducto,
 } from "@/types";
 
 // ── LOTES ──────────────────────────────────────────────────────────────
@@ -206,7 +209,7 @@ export async function getUsuarios(): Promise<Usuario[]> {
 
 export async function updateLote(
   id: string,
-  payload: Partial<Pick<LoteCajones, "marca" | "calibre" | "peso_total" | "cantidad_cajones" | "fecha" | "tipo_producto">>
+  payload: Partial<Pick<LoteCajones, "marca" | "calibre" | "peso_total" | "cantidad_cajones" | "fecha" | "tipo_producto" | "costo_por_cajon">>
 ): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("lotes_cajones").update(payload).eq("id", id);
@@ -316,12 +319,17 @@ export async function getProductos(): Promise<Producto[]> {
 export async function updateProductoPrecio(
   id: string,
   precio_venta: number | null,
-  codigo_plu: string | null
+  codigo_plu: string | null,
+  stock_source_id?: string | null,
+  precio_fijo?: boolean
 ): Promise<void> {
   const supabase = createClient();
+  const payload: Record<string, unknown> = { precio_venta, codigo_plu };
+  if (stock_source_id !== undefined) payload.stock_source_id = stock_source_id;
+  if (precio_fijo !== undefined) payload.precio_fijo = precio_fijo;
   const { error } = await supabase
     .from("productos")
-    .update({ precio_venta, codigo_plu })
+    .update(payload)
     .eq("id", id);
   if (error) throw error;
 }
@@ -338,6 +346,157 @@ export async function getProductoPorPlu(plu: string): Promise<Producto | null> {
   return data;
 }
 
+// ── MARCAS CONFIGURACIÓN ───────────────────────────────────────────────
+export async function getMarcas(): Promise<MarcaConfiguracion[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("marcas_configuracion")
+    .select("*")
+    .order("tipo_producto")
+    .order("nombre");
+  if (error) throw error;
+  return data;
+}
+
+export async function getMarcasByTipo(tipo: string): Promise<MarcaConfiguracion[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("marcas_configuracion")
+    .select("*")
+    .eq("tipo_producto", tipo)
+    .eq("activo", true)
+    .order("nombre");
+  if (error) throw error;
+  return data;
+}
+
+export async function insertMarca(
+  payload: Omit<MarcaConfiguracion, "id" | "created_at" | "updated_at">
+): Promise<MarcaConfiguracion> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("marcas_configuracion")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateMarca(
+  id: string,
+  payload: Partial<Omit<MarcaConfiguracion, "id" | "created_at" | "updated_at">>
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("marcas_configuracion")
+    .update(payload)
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteMarca(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("marcas_configuracion")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+}
+
+// ── RENTABILIDAD ────────────────────────────────────────────────────────
+// Lotes con su producción anidada para calcular rendimiento/costo en el cliente
+export async function getRentabilidadLotes(): Promise<VRentabilidadLote[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("lotes_cajones")
+    .select(`
+      id, marca, tipo_producto, calibre, fecha,
+      cantidad_cajones, peso_total, costo_por_cajon,
+      ordenes_desposte (
+        produccion ( peso_total_producido, rendimiento_real )
+      )
+    `)
+    .order("fecha", { ascending: false });
+  if (error) throw error;
+
+  // Calcular totales en el cliente
+  return (data ?? []).map((l) => {
+    const prods = (l.ordenes_desposte ?? []).flatMap(
+      (od: { produccion: { peso_total_producido: number; rendimiento_real: number }[] }) =>
+        od.produccion ?? []
+    );
+    const costo_por_cajon  = l.costo_por_cajon ?? 0;
+    const costo_total      = costo_por_cajon * l.cantidad_cajones;
+    const kilos_producidos = prods.reduce((s: number, p: { peso_total_producido: number }) => s + (p.peso_total_producido ?? 0), 0);
+    const rends            = prods.filter((p: { rendimiento_real: number }) => (p.rendimiento_real ?? 0) > 0).map((p: { rendimiento_real: number }) => p.rendimiento_real);
+    const rendimiento_promedio = rends.length > 0
+      ? rends.reduce((s: number, r: number) => s + r, 0) / rends.length
+      : 0;
+    const costo_por_kg_prod = kilos_producidos > 0 ? costo_total / kilos_producidos : 0;
+    return {
+      id:                  l.id,
+      marca:               l.marca,
+      tipo_producto:       l.tipo_producto,
+      calibre:             l.calibre,
+      fecha:               l.fecha,
+      cantidad_cajones:    l.cantidad_cajones,
+      peso_total:          l.peso_total,
+      costo_por_cajon,
+      costo_total,
+      kilos_producidos,
+      rendimiento_promedio,
+      costo_por_kg_prod,
+    } as VRentabilidadLote;
+  });
+}
+
+// Ventas agrupadas por producto calculadas en el cliente
+export async function getVentasPorProducto(): Promise<VVentasPorProducto[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("venta_items")
+    .select(`
+      kilos, precio_kg, subtotal,
+      producto:productos ( nombre ),
+      venta:ventas ( created_at )
+    `)
+    .not("precio_kg", "is", null);
+  if (error) throw error;
+
+  // Agrupar por producto en el cliente
+  const map: Record<string, {
+    kilos: number; ingreso: number; precios: number[];
+    count: number; fechas: string[];
+  }> = {};
+
+  for (const item of data ?? []) {
+    const nombre = (item.producto as { nombre: string } | null)?.nombre ?? "desconocido";
+    if (!map[nombre]) map[nombre] = { kilos: 0, ingreso: 0, precios: [], count: 0, fechas: [] };
+    map[nombre].kilos   += item.kilos ?? 0;
+    map[nombre].ingreso += item.subtotal ?? ((item.kilos ?? 0) * (item.precio_kg ?? 0));
+    if (item.precio_kg) map[nombre].precios.push(item.precio_kg);
+    map[nombre].count++;
+    const fecha = (item.venta as { created_at: string } | null)?.created_at;
+    if (fecha) map[nombre].fechas.push(fecha);
+  }
+
+  return Object.entries(map)
+    .map(([producto, v]) => ({
+      producto,
+      kilos_vendidos:    v.kilos,
+      ingreso_total:     v.ingreso,
+      precio_kg_promedio: v.precios.length > 0
+        ? v.precios.reduce((s, p) => s + p, 0) / v.precios.length
+        : 0,
+      transacciones:     v.count,
+      primera_venta:     v.fechas.length > 0 ? v.fechas.sort()[0] : "",
+      ultima_venta:      v.fechas.length > 0 ? v.fechas.sort().at(-1)! : "",
+    } as VVentasPorProducto))
+    .sort((a, b) => b.ingreso_total - a.ingreso_total);
+}
+
+// ── PRODUCTOS ───────────────────────────────────────────────────────────
 export async function insertProducto(payload: {
   nombre: string;          // slug interno (único en DB)
   codigo_plu?: string;

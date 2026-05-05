@@ -27,6 +27,7 @@ export interface LoteCajones {
   cantidad_cajones: number;
   cajones_disponibles: number;
   peso_promedio: number;
+  costo_por_cajon?: number;   // costo por cajón al momento de la compra
   fecha: string;
   notas?: string;
   usuario_id: string;
@@ -34,6 +35,45 @@ export interface LoteCajones {
   updated_at: string;
   // joins opcionales
   usuario?: Usuario;
+}
+
+export interface MarcaConfiguracion {
+  id: string;
+  nombre: string;
+  tipo_producto: string;
+  costo_por_cajon: number;
+  rendimiento_esperado?: number;
+  activo: boolean;
+  notas?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Para la vista de rentabilidad por lote
+export interface VRentabilidadLote {
+  id: string;
+  marca: string;
+  tipo_producto: string;
+  calibre?: string;
+  fecha: string;
+  cantidad_cajones: number;
+  peso_total: number;
+  costo_por_cajon: number;
+  costo_total: number;
+  kilos_producidos: number;
+  rendimiento_promedio: number;
+  costo_por_kg_prod: number;
+}
+
+// Para la vista de ventas por producto
+export interface VVentasPorProducto {
+  producto: string;
+  kilos_vendidos: number;
+  ingreso_total: number;
+  precio_kg_promedio: number;
+  transacciones: number;
+  primera_venta: string;
+  ultima_venta: string;
 }
 
 export interface OrdenDesposte {
@@ -85,6 +125,8 @@ export interface Producto {
   activo: boolean;
   precio_venta?: number;
   codigo_plu?: string;
+  stock_source_id?: string;   // para productos personalizados: de qué stock real se descuenta
+  precio_fijo?: boolean;      // true = precio_venta es total fijo (promo), no por kg
   created_at: string;
 }
 

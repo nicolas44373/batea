@@ -17,12 +17,12 @@ import type { Venta } from "@/types";
 const PRODUCTO_LABELS: Record<string, string> = {
   filet_fresco:      "Filet fresco",
   pata_muslo_fresca: "Pata/Muslo fresca",
+  pechuga_con_piel:  "Pechuga c/piel",
   alitas:            "Alitas",
   carcasa:           "Carcasa",
   menudos:           "Menudos",
   pollo_entero:      "Pollo entero",
   supremas:          "Supremas",
-  // compatibilidad con registros viejos
   pata_muslo:        "Pata/Muslo",
   pechuga:           "Filet fresco (desposte)",
 };

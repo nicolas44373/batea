@@ -16,6 +16,7 @@ import type { Producto } from "@/types";
 const SISTEMA_LABELS: Record<string, string> = {
   filet_fresco:         "Filet fresco",
   pata_muslo_fresca:    "Pata/Muslo fresca",
+  pechuga_con_piel:     "Pechuga c/piel",
   alitas:               "Alitas",
   carcasa:              "Carcasa",
   menudos:              "Menudos",
@@ -23,7 +24,6 @@ const SISTEMA_LABELS: Record<string, string> = {
   supremas:             "Supremas",
   filet_congelado:      "Filet congelado",
   pata_muslo_congelada: "Pata/Muslo congelada",
-  // productos internos (no se venden normalmente)
   pata_muslo:           "Pata/Muslo (desposte)",
   pechuga:              "Filet fresco (desposte)",
 };
@@ -35,8 +35,10 @@ function getNombreDisplay(prod: Producto): string {
 }
 
 interface PrecioEdit {
-  precio_venta: string;
-  codigo_plu:   string;
+  precio_venta:    string;
+  codigo_plu:      string;
+  stock_source_id: string;   // solo relevante para productos personalizados
+  precio_fijo:     boolean;  // true = precio_venta es total fijo (promo), no por kg
 }
 
 export default function PreciosPage() {
@@ -48,11 +50,13 @@ export default function PreciosPage() {
   const [modalOpen, setModalOpen]     = useState(false);
 
   // Nuevo producto
-  const [newNombre, setNewNombre]     = useState("");
-  const [newPlu, setNewPlu]           = useState("");
-  const [newPrecio, setNewPrecio]     = useState("");
-  const [creating, setCreating]       = useState(false);
-  const nombreRef                     = useRef<HTMLInputElement>(null);
+  const [newNombre, setNewNombre]             = useState("");
+  const [newPlu, setNewPlu]                   = useState("");
+  const [newPrecio, setNewPrecio]             = useState("");
+  const [newStockSource, setNewStockSource]   = useState("");
+  const [newPrecioFijo, setNewPrecioFijo]     = useState(false);
+  const [creating, setCreating]               = useState(false);
+  const nombreRef                             = useRef<HTMLInputElement>(null);
 
   const fetchProductos = useCallback(async () => {
     setLoading(true);
@@ -63,8 +67,10 @@ export default function PreciosPage() {
       const initial: Record<string, PrecioEdit> = {};
       data.forEach((p) => {
         initial[p.id] = {
-          precio_venta: p.precio_venta?.toString() ?? "",
-          codigo_plu:   p.codigo_plu ?? "",
+          precio_venta:    p.precio_venta?.toString() ?? "",
+          codigo_plu:      p.codigo_plu ?? "",
+          stock_source_id: p.stock_source_id ?? "",
+          precio_fijo:     p.precio_fijo ?? false,
         };
       });
       setEdits(initial);
@@ -91,7 +97,9 @@ export default function PreciosPage() {
       await updateProductoPrecio(
         producto.id,
         edit.precio_venta ? parseFloat(edit.precio_venta) : null,
-        edit.codigo_plu.trim() || null
+        edit.codigo_plu.trim() || null,
+        edit.stock_source_id || null,
+        edit.precio_fijo
       );
       toast.success(`${getNombreDisplay(producto)} actualizado`);
       fetchProductos();
@@ -113,8 +121,10 @@ export default function PreciosPage() {
     const edit = edits[producto.id];
     if (!edit) return false;
     return (
-      edit.precio_venta !== (producto.precio_venta?.toString() ?? "") ||
-      edit.codigo_plu   !== (producto.codigo_plu ?? "")
+      edit.precio_venta    !== (producto.precio_venta?.toString() ?? "") ||
+      edit.codigo_plu      !== (producto.codigo_plu ?? "") ||
+      edit.stock_source_id !== (producto.stock_source_id ?? "") ||
+      edit.precio_fijo     !== (producto.precio_fijo ?? false)
     );
   };
 
@@ -132,15 +142,27 @@ export default function PreciosPage() {
 
     setCreating(true);
     try {
-      await insertProducto({
-        nombre:       slug,
-        codigo_plu:   newPlu.trim(),
-        precio_venta: newPrecio ? parseFloat(newPrecio) : undefined,
+      const prod = await insertProducto({
+        nombre:          slug,
+        codigo_plu:      newPlu.trim(),
+        precio_venta:    newPrecio ? parseFloat(newPrecio) : undefined,
       });
+      // Si hay configuración extra (stock_source o precio_fijo), actualizar
+      if (newStockSource || newPrecioFijo) {
+        await updateProductoPrecio(
+          prod.id,
+          newPrecio ? parseFloat(newPrecio) : null,
+          newPlu.trim() || null,
+          newStockSource || null,
+          newPrecioFijo
+        );
+      }
       toast.success(`Producto "${newNombre}" creado`);
       setNewNombre("");
       setNewPlu("");
       setNewPrecio("");
+      setNewStockSource("");
+      setNewPrecioFijo(false);
       setModalOpen(false);
       fetchProductos();
     } catch (err: unknown) {
@@ -225,6 +247,7 @@ export default function PreciosPage() {
                   getNombre={getNombreDisplay}
                   showSlug={false}
                 />
+                
               )}
             </CardBody>
           </Card>
@@ -274,7 +297,9 @@ export default function PreciosPage() {
                   onSave={handleSave}
                   getNombre={getNombreDisplay}
                   showSlug={true}
+                  stockOptions={prodSistema}
                 />
+                
               )}
             </CardBody>
           </Card>
@@ -353,6 +378,41 @@ export default function PreciosPage() {
                 />
               </div>
             </div>
+
+            {/* Toggle precio fijo */}
+            <div className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-800">Precio fijo (promo)</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  El precio configurado es el total cobrado (ej: $10.500 por el combo),
+                  no se multiplica por los kilos. Solo se pide el peso real.
+                </p>
+              </div>
+              <Toggle value={newPrecioFijo} onChange={setNewPrecioFijo} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Descuenta stock de <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={newStockSource}
+                onChange={(e) => setNewStockSource(e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm
+                  focus:outline-none focus:ring-2 focus:ring-brand-500
+                  ${newStockSource ? "border-green-400" : "border-amber-300"}`}
+              >
+                <option value="">— Sin vincular —</option>
+                {prodSistema.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {SISTEMA_LABELS[s.nombre] ?? s.nombre}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Al vender este producto, el stock se descuenta del producto seleccionado.
+              </p>
+            </div>
           </div>
 
           <Button onClick={handleCreate} loading={creating} fullWidth>
@@ -364,20 +424,41 @@ export default function PreciosPage() {
   );
 }
 
+// ── Toggle reutilizable ──────────────────────────────────────────────────
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+      className={`relative inline-flex shrink-0 h-6 w-11 items-center rounded-full transition-colors duration-200
+        focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1
+        ${value ? "bg-purple-600" : "bg-gray-300"}`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200
+          ${value ? "translate-x-6" : "translate-x-1"}`}
+      />
+    </button>
+  );
+}
+
 // ── Componente reutilizable para lista de productos ─────────────────────
 interface ProductosListProps {
-  productos:   Producto[];
-  edits:       Record<string, PrecioEdit>;
-  saving:      Record<string, boolean>;
-  hasChange:   (p: Producto) => boolean;
-  onEdit:      (id: string, field: "precio_venta" | "codigo_plu", val: string) => void;
-  onSave:      (p: Producto) => Promise<void>;
-  getNombre:   (p: Producto) => string;
-  showSlug:    boolean;
+  productos:       Producto[];
+  edits:           Record<string, PrecioEdit>;
+  saving:          Record<string, boolean>;
+  hasChange:       (p: Producto) => boolean;
+  onEdit:          (id: string, field: keyof PrecioEdit, val: string | boolean) => void;
+  onSave:          (p: Producto) => Promise<void>;
+  getNombre:       (p: Producto) => string;
+  showSlug:        boolean;
+  stockOptions?:   Producto[];   // opciones para "Descuenta de"
 }
 
 function ProductosList({
-  productos, edits, saving, hasChange, onEdit, onSave, getNombre, showSlug,
+  productos, edits, saving, hasChange, onEdit, onSave, getNombre, showSlug, stockOptions,
 }: ProductosListProps) {
   return (
     <div className="divide-y divide-gray-100">
@@ -450,6 +531,58 @@ function ProductosList({
                 </div>
               </div>
             </div>
+
+            {/* Opciones extra — solo para productos personalizados */}
+            {showSlug && (
+              <div className="mt-2 space-y-2">
+                {/* Toggle precio fijo */}
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                  <div>
+                    <p className="text-xs font-medium text-gray-700">Precio fijo (promo)</p>
+                    <p className="text-xs text-gray-400">
+                      {edit.precio_fijo
+                        ? "El precio no se multiplica por kilos — se cobra el total configurado"
+                        : "Precio normal por kg"}
+                    </p>
+                  </div>
+                  <Toggle
+                    value={!!edit.precio_fijo}
+                    onChange={(v) => onEdit(prod.id, "precio_fijo", v)}
+                  />
+                </div>
+
+                {/* Descuenta de */}
+                {stockOptions && stockOptions.length > 0 && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Descuenta stock de
+                    </label>
+                    <select
+                      value={edit.stock_source_id}
+                      onChange={(e) => onEdit(prod.id, "stock_source_id", e.target.value)}
+                      className={`w-full rounded-lg border px-2.5 py-1.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-brand-500
+                        ${edit.stock_source_id
+                          ? "border-green-400 bg-green-50 text-green-800 font-medium"
+                          : "border-amber-300 bg-amber-50 text-amber-700"
+                        }`}
+                    >
+                      <option value="">— Sin vincular (no descuenta stock) —</option>
+                      {stockOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {SISTEMA_LABELS[s.nombre] ?? s.nombre}
+                        </option>
+                      ))}
+                    </select>
+                    {!edit.stock_source_id && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Sin vincular: este producto no descontará stock al venderse.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

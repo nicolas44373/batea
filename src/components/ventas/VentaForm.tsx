@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
-import { Badge } from "@/components/ui/Badge";
 import { getProductoPorPlu, getStock, insertVenta } from "@/lib/supabase/queries";
 import { formatKilos, formatMoneda } from "@/lib/utils";
 import type { Producto, VStockActual } from "@/types";
@@ -13,20 +12,20 @@ import type { Producto, VStockActual } from "@/types";
 const PRODUCTO_LABELS: Record<string, string> = {
   filet_fresco:      "Filet fresco",
   pata_muslo_fresca: "Pata/Muslo fresca",
+  pechuga_con_piel:  "Pechuga c/piel",
   alitas:            "Alitas",
   carcasa:           "Carcasa",
   menudos:           "Menudos",
   pollo_entero:      "Pollo entero",
   supremas:          "Supremas",
-  // compatibilidad con registros viejos
   pata_muslo:        "Pata/Muslo",
   pechuga:           "Filet fresco (desposte)",
 };
 
-// Productos que aparecen en la selección manual (solo los de batea)
 const PRODUCTOS_BATEA_VENTA = new Set([
   "filet_fresco",
   "pata_muslo_fresca",
+  "pechuga_con_piel",
   "alitas",
   "carcasa",
   "menudos",
@@ -34,10 +33,16 @@ const PRODUCTOS_BATEA_VENTA = new Set([
   "supremas",
 ]);
 
+// Productos habilitados para el modo promo (precio fijo por unidad de venta)
+const PRODUCTOS_PROMO = new Set(["filet_fresco", "pata_muslo_fresca", "pechuga_con_piel"]);
+
 interface CartItem {
   producto: Producto;
-  kilos: number;
-  precio_kg: number;
+  kilos: number;           // kilos reales (balanza) → se descuenta del stock
+  precio_kg: number;       // calculado internamente: precio_total / kilos
+  isPromo: boolean;        // true cuando se vendió con precio fijo
+  promoTotal: number;      // precio fijo total de la promo (solo cuando isPromo=true)
+  stockProductoId?: string; // si != null, este es el producto_id real para deducir stock
 }
 
 interface VentaFormProps {
@@ -60,7 +65,10 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
   const [scanPrecio, setScanPrecio]     = useState("");
   const [scanError, setScanError]       = useState("");
 
-  // Timing para detectar pistola (input rápido)
+  // Promo state
+  const [promoMode, setPromoMode]       = useState(false);
+  const [scanPromoTotal, setScanPromoTotal] = useState("");
+
   const lastKeyTime = useRef<number>(0);
   const scanBuffer  = useRef<string>("");
   const pluRef      = useRef<HTMLInputElement>(null);
@@ -69,25 +77,30 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     getStock().then(setStock);
   }, []);
 
-  // Auto-focus en el campo PLU al abrir modo scanner
   useEffect(() => {
     if (scannerMode) {
       setTimeout(() => pluRef.current?.focus(), 100);
     }
   }, [scannerMode]);
 
-  // ── Manejo de la pistola lectora ─────────────────────────────────────
-  // Las pistolas envían caracteres muy rápido (<50ms entre teclas) + Enter al final
+  // Cuando cambia el producto escaneado: si es precio_fijo, activar promo automáticamente
+  useEffect(() => {
+    if (scanResult) {
+      const esFijo = scanResult.precio_fijo === true;
+      setPromoMode(esFijo);
+      setScanPromoTotal(
+        scanResult.precio_venta ? scanResult.precio_venta.toString() : ""
+      );
+    }
+  }, [scanResult]);
+
   const handlePluKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     const now = Date.now();
     const delta = now - lastKeyTime.current;
     lastKeyTime.current = now;
-
-    // Si el caracter llegó en menos de 80ms del anterior → es pistola
     if (delta < 80 && e.key.length === 1) {
       scanBuffer.current += e.key;
     }
-
     if (e.key === "Enter") {
       e.preventDefault();
       const code = (pluInput + (scanBuffer.current || "")).trim();
@@ -108,9 +121,12 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         pluRef.current?.focus();
         return;
       }
-      const stockItem = stock.find((s) => s.producto_id === prod.id);
+      // Para productos personalizados con stock vinculado, verificar el stock de la fuente
+      const stockCheckId = prod.stock_source_id ?? prod.id;
+      const stockItem = stock.find((s) => s.producto_id === stockCheckId);
       if (!stockItem || stockItem.kilos <= 0) {
-        setScanError(`Sin stock disponible de ${PRODUCTO_LABELS[prod.nombre] ?? prod.nombre}.`);
+        const nombre = PRODUCTO_LABELS[prod.nombre] ?? prod.nombre;
+        setScanError(`Sin stock disponible de ${nombre}.`);
         setPluInput("");
         pluRef.current?.focus();
         return;
@@ -124,6 +140,14 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     }
   };
 
+  const resetScanPanel = () => {
+    setScanResult(null);
+    setScanKilos("");
+    setScanPrecio("");
+    setScanPromoTotal("");
+    setPromoMode(false);
+  };
+
   const agregarAlCarrito = () => {
     if (!scanResult) return;
     const kilos = parseFloat(scanKilos);
@@ -131,45 +155,76 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       toast.error("Ingresá los kilos");
       return;
     }
-    const stockItem = stock.find((s) => s.producto_id === scanResult.id);
+    // Chequear stock usando la fuente vinculada si existe
+    const stockCheckId = scanResult.stock_source_id ?? scanResult.id;
+    const stockItem = stock.find((s) => s.producto_id === stockCheckId);
     if (stockItem && kilos > stockItem.kilos) {
       toast.error(`Máximo disponible: ${formatKilos(stockItem.kilos)}`);
       return;
     }
-    const precio = parseFloat(scanPrecio) || 0;
-    const existing = cart.findIndex((c) => c.producto.id === scanResult.id);
+
+    let precio_kg: number;
+    let promoTotal = 0;
+    let isPromo = false;
+
+    if (promoMode) {
+      const total = parseFloat(scanPromoTotal);
+      if (!total || total <= 0) {
+        toast.error("Ingresá el precio total de la promo");
+        return;
+      }
+      precio_kg  = total / kilos;
+      promoTotal = total;
+      isPromo    = true;
+    } else {
+      precio_kg = parseFloat(scanPrecio) || 0;
+    }
+
+    // Los ítems promo se agregan siempre como línea nueva (no se acumulan)
+    const stockProductoId = scanResult.stock_source_id ?? undefined;
+    const existing = !isPromo ? cart.findIndex((c) => c.producto.id === scanResult.id && !c.isPromo) : -1;
     if (existing >= 0) {
       const updated = [...cart];
       updated[existing] = { ...updated[existing], kilos: updated[existing].kilos + kilos };
       setCart(updated);
     } else {
-      setCart((prev) => [...prev, { producto: scanResult, kilos, precio_kg: precio }]);
+      setCart((prev) => [...prev, { producto: scanResult, kilos, precio_kg, isPromo, promoTotal, stockProductoId }]);
     }
-    setScanResult(null);
-    setScanKilos("");
-    setScanPrecio("");
+
+    resetScanPanel();
     toast.success(`${PRODUCTO_LABELS[scanResult.nombre] ?? scanResult.nombre} agregado`);
     setTimeout(() => pluRef.current?.focus(), 100);
   };
 
   const removeFromCart = (idx: number) => setCart((prev) => prev.filter((_, i) => i !== idx));
 
-  const updateCartItem = (idx: number, field: "kilos" | "precio_kg", value: number) => {
-    setCart((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  const updateCartKilos = (idx: number, kilos: number) => {
+    setCart((prev) => prev.map((item, i) => {
+      if (i !== idx) return item;
+      if (item.isPromo) {
+        // Recalcular precio_kg para mantener el promoTotal exacto
+        return { ...item, kilos, precio_kg: item.promoTotal / kilos };
+      }
+      return { ...item, kilos };
+    }));
   };
 
-  // ── Validación de stock ───────────────────────────────────────────────
+  const updateCartPrecio = (idx: number, value: number) => {
+    setCart((prev) => prev.map((item, i) => i === idx ? { ...item, precio_kg: value } : item));
+  };
+
   const stockErrors: Record<number, string> = {};
   cart.forEach((item, i) => {
-    const s = stock.find((s) => s.producto_id === item.producto.id);
+    const checkId = item.stockProductoId ?? item.producto.id;
+    const s = stock.find((s) => s.producto_id === checkId);
     if (s && item.kilos > s.kilos) {
       stockErrors[i] = `Máx: ${s.kilos.toFixed(2)} kg`;
     }
   });
 
-  const totalKilos  = cart.reduce((s, i) => s + i.kilos, 0);
-  const totalMonto  = cart.reduce((s, i) => s + i.kilos * i.precio_kg, 0);
-  const hasErrors   = Object.keys(stockErrors).length > 0;
+  const totalKilos = cart.reduce((s, i) => s + i.kilos, 0);
+  const totalMonto = cart.reduce((s, i) => s + (i.isPromo ? i.promoTotal : i.kilos * i.precio_kg), 0);
+  const hasErrors  = Object.keys(stockErrors).length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,7 +234,12 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     try {
       await insertVenta(
         { cliente: cliente || undefined, notas: notas || undefined, usuario_id: usuarioId },
-        cart.map((i) => ({ producto_id: i.producto.id, kilos: i.kilos, precio_kg: i.precio_kg || undefined }))
+        cart.map((i) => ({
+          // Si el producto tiene fuente de stock, usar ese id para que el trigger descuente correctamente
+          producto_id: i.stockProductoId ?? i.producto.id,
+          kilos: i.kilos,
+          precio_kg: i.precio_kg || undefined,
+        }))
       );
       toast.success("Venta registrada");
       setCart([]);
@@ -193,6 +253,11 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       setLoading(false);
     }
   };
+
+  // Pueden entrar en modo promo: productos del sistema habilitados + cualquier producto personalizado
+  const canPromo = scanResult
+    ? PRODUCTOS_PROMO.has(scanResult.nombre) || !!scanResult.stock_source_id || !!scanResult.precio_fijo
+    : false;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -255,10 +320,12 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
 
           {/* Panel del producto escaneado */}
           {scanResult && (
-            <div className="border-2 border-green-400 bg-green-50 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-green-600 font-medium uppercase tracking-wide">Producto detectado</p>
+            <div className={`border-2 rounded-xl p-4 space-y-3 ${promoMode ? "border-purple-400 bg-purple-50" : "border-green-400 bg-green-50"}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <p className={`text-xs font-medium uppercase tracking-wide ${promoMode ? "text-purple-600" : "text-green-600"}`}>
+                    Producto detectado
+                  </p>
                   <p className="text-lg font-bold text-gray-900">
                     {PRODUCTO_LABELS[scanResult.nombre] ?? scanResult.nombre}
                   </p>
@@ -266,17 +333,41 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     <p className="text-xs text-gray-500">PLU {scanResult.codigo_plu}</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { setScanResult(null); pluRef.current?.focus(); }}
-                  className="text-gray-400 hover:text-gray-600 text-xl"
-                >×</button>
+                <div className="flex items-center gap-2">
+                  {/* Toggle promo — solo para productos habilitados */}
+                  {canPromo && (
+                    <button
+                      type="button"
+                      onClick={() => setPromoMode((v) => !v)}
+                      className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all ${
+                        promoMode
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "bg-white text-purple-700 border-purple-300 hover:bg-purple-50"
+                      }`}
+                    >
+                      PROMO
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { resetScanPanel(); pluRef.current?.focus(); }}
+                    className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                  >×</button>
+                </div>
               </div>
+
+              {/* Aviso modo promo */}
+              {promoMode && (
+                <p className="text-xs text-purple-700 bg-purple-100 rounded-lg px-3 py-2">
+                  El stock se descuenta por los kilos reales de la balanza.
+                  El cliente paga el precio total fijo de la promo.
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Kilos
+                    {promoMode ? "Kilos balanza (real)" : "Kilos"}
                   </label>
                   <input
                     type="number"
@@ -287,35 +378,82 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     onChange={(e) => setScanKilos(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarAlCarrito(); } }}
                     placeholder="0.000"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base font-mono
-                               focus:outline-none focus:ring-2 focus:ring-green-400"
+                    className={`w-full rounded-lg border px-3 py-2 text-base font-mono
+                               focus:outline-none ${promoMode
+                                 ? "border-purple-300 focus:ring-2 focus:ring-purple-400"
+                                 : "border-gray-300 focus:ring-2 focus:ring-green-400"
+                               }`}
                   />
+                  {promoMode && scanKilos && (
+                    <p className="text-xs text-purple-600 mt-0.5">Se descuenta del stock</p>
+                  )}
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    $/kg
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={scanPrecio}
-                    onChange={(e) => setScanPrecio(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarAlCarrito(); } }}
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base font-mono
-                               focus:outline-none focus:ring-2 focus:ring-green-400"
-                  />
+                  {promoMode ? (
+                    <>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Precio total promo ($)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={scanPromoTotal}
+                        onChange={(e) => setScanPromoTotal(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarAlCarrito(); } }}
+                        placeholder="0.00"
+                        readOnly={scanResult?.precio_fijo === true}
+                        className={`w-full rounded-lg border px-3 py-2 text-base font-mono
+                          focus:outline-none focus:ring-2 focus:ring-purple-400
+                          ${scanResult?.precio_fijo
+                            ? "border-purple-300 bg-purple-50 text-purple-800 font-bold cursor-default"
+                            : "border-purple-300"
+                          }`}
+                      />
+                      <p className="text-xs text-purple-600 mt-0.5">
+                        {scanResult?.precio_fijo ? "Precio fijo — no se multiplica por kg" : "Precio fijo cobrado"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">$/kg</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={scanPrecio}
+                        onChange={(e) => setScanPrecio(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarAlCarrito(); } }}
+                        placeholder="0.00"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base font-mono
+                                   focus:outline-none focus:ring-2 focus:ring-green-400"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
 
-              {scanKilos && parseFloat(scanKilos) > 0 && parseFloat(scanPrecio) > 0 && (
-                <p className="text-sm font-semibold text-gray-800 text-right">
-                  Subtotal: {formatMoneda(parseFloat(scanKilos) * parseFloat(scanPrecio))}
-                </p>
-              )}
+              {/* Preview subtotal */}
+              {promoMode
+                ? scanKilos && parseFloat(scanKilos) > 0 && scanPromoTotal && parseFloat(scanPromoTotal) > 0 && (
+                  <div className="text-sm text-right space-y-0.5">
+                    <p className="text-gray-500">{parseFloat(scanKilos).toFixed(3)} kg reales → stock</p>
+                    <p className="font-bold text-purple-800">
+                      Promo: {formatMoneda(parseFloat(scanPromoTotal))}
+                    </p>
+                  </div>
+                )
+                : scanKilos && parseFloat(scanKilos) > 0 && parseFloat(scanPrecio) > 0 && (
+                  <p className="text-sm font-semibold text-gray-800 text-right">
+                    Subtotal: {formatMoneda(parseFloat(scanKilos) * parseFloat(scanPrecio))}
+                  </p>
+                )
+              }
 
-              <Button type="button" onClick={agregarAlCarrito} fullWidth>
+              <Button type="button" onClick={agregarAlCarrito} fullWidth
+                className={promoMode ? "bg-purple-600 hover:bg-purple-700 text-white" : ""}
+              >
                 Agregar al carrito (Enter)
               </Button>
             </div>
@@ -331,8 +469,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
             {stock
               .filter((s) => s.kilos > 0 && PRODUCTOS_BATEA_VENTA.has(s.producto))
               .sort((a, b) => {
-                // Filet fresco y Pata/Muslo fresca primero
-                const orden = ["filet_fresco", "pata_muslo_fresca"];
+                const orden = ["filet_fresco", "pata_muslo_fresca", "pechuga_con_piel"];
                 const ia = orden.indexOf(a.producto);
                 const ib = orden.indexOf(b.producto);
                 if (ia !== -1 && ib !== -1) return ia - ib;
@@ -358,7 +495,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     setScannerMode(true);
                   }}
                   className={`flex flex-col text-left p-3 rounded-lg border transition-all
-                    ${["filet_fresco","pata_muslo_fresca"].includes(s.producto)
+                    ${["filet_fresco","pata_muslo_fresca","pechuga_con_piel"].includes(s.producto)
                       ? "border-brand-300 bg-brand-50 hover:border-brand-500"
                       : "border-gray-200 hover:border-brand-400 hover:bg-brand-50"
                     }`}
@@ -377,41 +514,63 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       {cart.length > 0 && (
         <div className="border border-gray-200 rounded-xl overflow-hidden">
           <div className="bg-gray-50 px-3 py-2 border-b border-gray-200">
-            <p className="text-sm font-semibold text-gray-700">Carrito ({cart.length} ítem{cart.length !== 1 ? "s" : ""})</p>
+            <p className="text-sm font-semibold text-gray-700">
+              Carrito ({cart.length} ítem{cart.length !== 1 ? "s" : ""})
+            </p>
           </div>
           <div className="divide-y divide-gray-100">
             {cart.map((item, i) => (
-              <div key={i} className="px-3 py-2.5 flex items-center gap-2">
+              <div key={i} className={`px-3 py-2.5 flex items-center gap-2 ${item.isPromo ? "bg-purple-50" : ""}`}>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">
-                    {PRODUCTO_LABELS[item.producto.nombre] ?? item.producto.nombre}
-                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {PRODUCTO_LABELS[item.producto.nombre] ?? item.producto.nombre}
+                    </p>
+                    {item.isPromo && (
+                      <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold shrink-0">
+                        PROMO
+                      </span>
+                    )}
+                  </div>
                   {stockErrors[i] && (
                     <p className="text-xs text-red-600">{stockErrors[i]}</p>
                   )}
                 </div>
+
+                {/* Kilos reales */}
                 <input
                   type="number"
                   step="0.001"
                   min="0.001"
                   value={item.kilos}
-                  onChange={(e) => updateCartItem(i, "kilos", parseFloat(e.target.value) || 0)}
+                  onChange={(e) => updateCartKilos(i, parseFloat(e.target.value) || 0)}
                   className={`w-20 rounded border px-2 py-1 text-sm font-mono text-right
-                    ${stockErrors[i] ? "border-red-400" : "border-gray-300"}`}
+                    ${stockErrors[i] ? "border-red-400" : item.isPromo ? "border-purple-300" : "border-gray-300"}`}
                 />
                 <span className="text-xs text-gray-400">kg</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={item.precio_kg}
-                  onChange={(e) => updateCartItem(i, "precio_kg", parseFloat(e.target.value) || 0)}
-                  className="w-24 rounded border border-gray-300 px-2 py-1 text-sm font-mono text-right"
-                />
-                <span className="text-xs text-gray-400">$/kg</span>
-                <span className="text-sm font-semibold text-gray-800 w-24 text-right">
-                  {item.precio_kg > 0 ? formatMoneda(item.kilos * item.precio_kg) : "—"}
-                </span>
+
+                {/* Precio: editable solo para no-promo */}
+                {item.isPromo ? (
+                  <span className="text-sm font-bold text-purple-700 w-28 text-right shrink-0">
+                    {formatMoneda(item.promoTotal)}
+                  </span>
+                ) : (
+                  <>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.precio_kg}
+                      onChange={(e) => updateCartPrecio(i, parseFloat(e.target.value) || 0)}
+                      className="w-24 rounded border border-gray-300 px-2 py-1 text-sm font-mono text-right"
+                    />
+                    <span className="text-xs text-gray-400">$/kg</span>
+                    <span className="text-sm font-semibold text-gray-800 w-24 text-right">
+                      {item.precio_kg > 0 ? formatMoneda(item.kilos * item.precio_kg) : "—"}
+                    </span>
+                  </>
+                )}
+
                 <button
                   type="button"
                   onClick={() => removeFromCart(i)}
@@ -420,9 +579,10 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
               </div>
             ))}
           </div>
+
           {/* Total */}
           <div className="bg-gray-50 border-t border-gray-200 px-3 py-2.5 flex items-center justify-between">
-            <div className="flex gap-4 text-sm">
+            <div className="flex flex-wrap gap-4 text-sm">
               <span className="text-gray-600">
                 Total: <strong>{totalKilos.toFixed(3)} kg</strong>
               </span>
@@ -445,7 +605,6 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         <Alert variant="danger">Hay productos con stock insuficiente. Ajustá las cantidades.</Alert>
       )}
 
-      {/* Cliente */}
       <Input
         label="Cliente (opcional)"
         placeholder="Nombre del cliente"

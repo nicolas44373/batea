@@ -25,7 +25,7 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
   const [saving, setSaving] = useState(false);
 
   // edit form state
-  const [editForm, setEditForm] = useState({ marca: "", calibre: "", peso_total: "", cantidad_cajones: "" });
+  const [editForm, setEditForm] = useState({ marca: "", calibre: "", peso_total: "", cantidad_cajones: "", costo_por_cajon: "" });
 
   function openEdit(lote: LoteCajones) {
     setEditForm({
@@ -33,6 +33,7 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
       calibre: lote.calibre?.toString() ?? "",
       peso_total: lote.peso_total.toString(),
       cantidad_cajones: lote.cantidad_cajones.toString(),
+      costo_por_cajon: lote.costo_por_cajon?.toString() ?? "0",
     });
     setEditTarget(lote);
   }
@@ -46,6 +47,7 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
         calibre: editForm.calibre ? Number(editForm.calibre) : undefined,
         peso_total: Number(editForm.peso_total),
         cantidad_cajones: Number(editForm.cantidad_cajones),
+        costo_por_cajon: editForm.costo_por_cajon ? Number(editForm.costo_por_cajon) : 0,
       });
       toast.success("Lote actualizado");
       setEditTarget(null);
@@ -128,6 +130,24 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
             render: (row) => formatKilos(row.peso_promedio),
           },
           {
+            key: "costo_por_cajon",
+            header: "Costo/cajón",
+            align: "right",
+            render: (row) =>
+              row.costo_por_cajon && row.costo_por_cajon > 0 ? (
+                <div className="text-right">
+                  <span className="font-medium text-gray-800">
+                    ${row.costo_por_cajon.toLocaleString("es-AR")}
+                  </span>
+                  <div className="text-xs text-gray-400">
+                    Total: ${(row.costo_por_cajon * row.cantidad_cajones).toLocaleString("es-AR")}
+                  </div>
+                </div>
+              ) : (
+                <span className="text-xs text-amber-500 font-medium">Sin costo</span>
+              ),
+          },
+          {
             key: "usuario_id",
             header: "Registrado por",
             render: (row) =>
@@ -199,6 +219,21 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
               value={editForm.cantidad_cajones}
               onChange={(e) => setEditForm((f) => ({ ...f, cantidad_cajones: e.target.value }))}
             />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Costo por cajón ($)</label>
+            <Input
+              type="number"
+              step="0.01"
+              placeholder="0.00"
+              value={editForm.costo_por_cajon}
+              onChange={(e) => setEditForm((f) => ({ ...f, costo_por_cajon: e.target.value }))}
+            />
+            {editForm.costo_por_cajon && editForm.cantidad_cajones && (
+              <p className="text-xs text-gray-500 mt-1">
+                Costo total: ${(Number(editForm.costo_por_cajon) * Number(editForm.cantidad_cajones)).toLocaleString("es-AR")}
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setEditTarget(null)} disabled={saving}>Cancelar</Button>

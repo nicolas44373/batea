@@ -29,6 +29,7 @@ import type { LoteCajones, VAlertasProduccion, VStockActual, Venta } from "@/typ
 const PRODUCTO_LABELS: Record<string, string> = {
   filet_fresco:      "Filet fresco",
   pata_muslo_fresca: "Pata/Muslo fresca",
+  pechuga_con_piel:  "Pechuga c/piel",
   alitas:            "Alitas",
   carcasa:           "Carcasa",
   menudos:           "Menudos",
@@ -39,8 +40,8 @@ const PRODUCTO_LABELS: Record<string, string> = {
 };
 
 const PRODUCTOS_BATEA = new Set([
-  "filet_fresco", "pata_muslo_fresca", "alitas",
-  "carcasa", "menudos", "pollo_entero", "supremas",
+  "filet_fresco", "pata_muslo_fresca", "pechuga_con_piel",
+  "alitas", "carcasa", "menudos", "pollo_entero", "supremas",
 ]);
 
 export default function DashboardPage() {
