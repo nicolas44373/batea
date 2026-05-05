@@ -67,6 +67,18 @@ export async function getOrdenes(): Promise<OrdenDesposte[]> {
   return data;
 }
 
+/** Solo lo necesario para calcular cajones ya asignados por lote */
+export async function getOrdenesCajonesResumen(): Promise<
+  Pick<OrdenDesposte, "lote_id" | "cantidad_cajones" | "estado">[]
+> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("ordenes_desposte")
+    .select("lote_id, cantidad_cajones, estado");
+  if (error) throw error;
+  return (data ?? []) as Pick<OrdenDesposte, "lote_id" | "cantidad_cajones" | "estado">[];
+}
+
 export async function getOrden(id: string): Promise<OrdenDesposte> {
   const supabase = createClient();
   const { data, error } = await supabase

@@ -173,6 +173,7 @@ export default function DespostePage() {
         size="lg"
       >
         <OrdenDesposteForm
+          active={modalOpen}
           usuarioId={userId}
           onSuccess={() => {
             setModalOpen(false);

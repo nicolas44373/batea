@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import type { LoteCajones, OrdenEstado } from "@/types";
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
@@ -94,6 +95,27 @@ export const CORTES = [
   { key: "menudos",          label: "Menudos" },
   { key: "otros",            label: "Otros" },
 ] as const;
+
+/** Resumen mínimo de órdenes para nuevo desposte */
+export interface OrdenCajonesResumen {
+  lote_id: string;
+  cantidad_cajones: number;
+  estado: OrdenEstado;
+}
+
+/**
+ * Cajones que aún pueden asignarse (excluye lotes donde todas las ordenes cubren el total).
+ * Cruza cantidad original del lote con suma de ordenes activas/completadas.
+ */
+export function cajonesLibresParaNuevaOrden(lote: LoteCajones, ordenes: OrdenCajonesResumen[]): number {
+  const asignados = ordenes
+    .filter((o) => o.lote_id === lote.id && o.estado !== "cancelada")
+    .reduce((s, o) => s + Number(o.cantidad_cajones ?? 0), 0);
+  const totalEnLote = Number(lote.cantidad_cajones ?? 0);
+  const enDb = Number(lote.cajones_disponibles ?? 0);
+  const porOrdenes = Math.max(0, totalEnLote - asignados);
+  return Math.min(enDb, porOrdenes);
+}
 
 // Calibres de pollo entero: cantidad de pollos por cajón
 export const CALIBRES_POLLO = ["5", "6", "7", "8", "9", "10", "11", "12"] as const;
