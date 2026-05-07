@@ -1,5 +1,6 @@
 import { createClient } from "./client";
 import { candidatosCodigoBarrasParaPlu } from "@/lib/utils";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   LoteCajones,
   OrdenDesposte,
@@ -15,6 +16,89 @@ import type {
   VRentabilidadLote,
   VVentasPorProducto,
 } from "@/types";
+
+/** Fila DB puede usar `pollo_entero` o la columna legacy `otros`. */
+function normalizeProduccionRow(row: Record<string, unknown>): Produccion {
+  const raw = row.pollo_entero ?? row.otros;
+  const pollo_entero =
+    typeof raw === "number" && !Number.isNaN(raw) ? raw : 0;
+  const { otros: _legacy, ...rest } = row;
+  return { ...rest, pollo_entero } as Produccion;
+}
+
+function normalizeNestedProduccion(raw: unknown): Produccion | undefined {
+  if (raw == null) return undefined;
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  if (row == null || typeof row !== "object") return undefined;
+  return normalizeProduccionRow(row as Record<string, unknown>);
+}
+
+function isMissingPolloEnteroColumnError(err: { code?: string; message?: string | null }): boolean {
+  const m = err.message ?? "";
+  if (!m.includes("pollo_entero")) return false;
+  if (err.code === "PGRST204") return true;
+  const low = m.toLowerCase();
+  return low.includes("column") && low.includes("produccion");
+}
+
+/**
+ * El trigger SQL de producción suele mapear cortes por nombre de columna; la legacy `otros`
+ * no alimenta el producto `pollo_entero`. Sumamos explícito en stock al registrar.
+ */
+async function ingresarStockPolloEnteroPorProduccion(
+  supabase: SupabaseClient,
+  kilos: number,
+  produccionId: string,
+  usuarioId: string
+): Promise<void> {
+  if (kilos <= 0 || !Number.isFinite(kilos)) return;
+
+  const { data: producto, error: eProd } = await supabase
+    .from("productos")
+    .select("id")
+    .eq("nombre", "pollo_entero")
+    .eq("activo", true)
+    .maybeSingle();
+  if (eProd) throw eProd;
+  if (!producto?.id) {
+    throw new Error(
+      'No existe un producto activo con nombre interno "pollo_entero". Agregalo en Configuración → Precios para poder sumar este stock.'
+    );
+  }
+
+  const { data: stockPrev, error: eStock } = await supabase
+    .from("stock_productos")
+    .select("kilos")
+    .eq("producto_id", producto.id)
+    .maybeSingle();
+  if (eStock) throw eStock;
+
+  const kilosAnterior = Number(stockPrev?.kilos ?? 0);
+  const kilosNuevo = kilosAnterior + kilos;
+
+  const { error: eUpsert } = await supabase.from("stock_productos").upsert(
+    {
+      producto_id: producto.id,
+      kilos: kilosNuevo,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "producto_id" }
+  );
+  if (eUpsert) throw eUpsert;
+
+  const { error: eMov } = await supabase.from("movimientos_stock").insert({
+    producto_id: producto.id,
+    tipo: "ingreso",
+    kilos,
+    kilos_anterior: kilosAnterior,
+    kilos_nuevo: kilosNuevo,
+    referencia_tipo: "produccion",
+    referencia_id: produccionId,
+    notas: "Producción desposte — pollo entero",
+    usuario_id: usuarioId,
+  });
+  if (eMov) throw eMov;
+}
 
 // ── LOTES ──────────────────────────────────────────────────────────────
 export async function getLotes(): Promise<LoteCajones[]> {
@@ -94,7 +178,12 @@ export async function getOrden(id: string): Promise<OrdenDesposte> {
     .eq("id", id)
     .single();
   if (error) throw error;
-  return data;
+  return {
+    ...data,
+    produccion: normalizeNestedProduccion(
+      (data as { produccion?: unknown }).produccion
+    ),
+  } as OrdenDesposte;
 }
 
 export async function insertOrden(
@@ -122,19 +211,44 @@ export async function getProduccion(): Promise<Produccion[]> {
     `)
     .order("fecha_produccion", { ascending: false });
   if (error) throw error;
-  return data;
+  return (data ?? []).map((row) =>
+    normalizeProduccionRow(row as Record<string, unknown>)
+  );
 }
 
 export async function insertProduccion(
   payload: Omit<Produccion, "id" | "peso_total_producido" | "rendimiento_real" | "tiene_alerta" | "alerta_detalle" | "fecha_produccion" | "created_at" | "updated_at">
 ): Promise<Produccion> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  const { pollo_entero, ...rest } = payload;
+
+  const insertNew = { ...rest, pollo_entero };
+  const insertLegacy = { ...rest, otros: pollo_entero };
+
+  let { data, error } = await supabase
     .from("produccion")
-    .insert(payload)
+    .insert(insertNew as never)
     .select()
     .single();
+
+  if (error && isMissingPolloEnteroColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("produccion")
+      .insert(insertLegacy as never)
+      .select()
+      .single());
+  }
+
   if (error) throw error;
+
+  const row = normalizeProduccionRow(data as Record<string, unknown>);
+  await ingresarStockPolloEnteroPorProduccion(
+    supabase,
+    row.pollo_entero,
+    row.id,
+    payload.registrado_por
+  );
+
   /* Respaldo: el trigger SQL debería marcar la orden como completada en la misma transacción */
   const { error: ordErr } = await supabase
     .from("ordenes_desposte")
@@ -146,7 +260,7 @@ export async function insertProduccion(
   if (ordErr) {
     console.warn("[insertProduccion] Actualizar orden:", ordErr.message);
   }
-  return data;
+  return row;
 }
 
 // ── STOCK ──────────────────────────────────────────────────────────────

@@ -92,7 +92,7 @@ export const CORTES = [
   { key: "alitas",           label: "Alitas" },
   { key: "carcasa",          label: "Carcasa" },
   { key: "menudos",          label: "Menudos" },
-  { key: "otros",            label: "Otros" },
+  { key: "pollo_entero",     label: "Pollo entero" },
 ] as const;
 
 /** Resumen mínimo de órdenes para nuevo desposte */

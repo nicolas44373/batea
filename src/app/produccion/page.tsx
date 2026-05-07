@@ -295,16 +295,6 @@ function ResumenProduccion({
   printRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }) {
-  const cortesFull = [
-    { key: "pata_muslo",       label: "Pata/Muslo" },
-    { key: "pechuga",          label: "Filet fresco" },
-    { key: "pechuga_con_piel", label: "Pechuga c/piel" },
-    { key: "alitas",           label: "Alitas" },
-    { key: "carcasa",          label: "Carcasa" },
-    { key: "menudos",          label: "Menudos" },
-    { key: "otros",            label: "Otros" },
-  ] as const;
-
   const peso_estimado = p.orden?.peso_estimado ?? 0;
 
   function handlePrint() {
@@ -396,7 +386,7 @@ function ResumenProduccion({
             </tr>
           </thead>
           <tbody>
-            {cortesFull.map((corte) => {
+            {CORTES.map((corte) => {
               const kilos = (p[corte.key as keyof Produccion] as number) ?? 0;
               const pctTotal = p.peso_total_producido > 0 ? (kilos / p.peso_total_producido) * 100 : 0;
               const pctEst   = peso_estimado > 0 ? (kilos / peso_estimado) * 100 : 0;

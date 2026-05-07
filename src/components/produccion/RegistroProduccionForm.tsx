@@ -19,7 +19,7 @@ const schema = z.object({
   alitas:           z.coerce.number().min(0),
   carcasa:          z.coerce.number().min(0),
   menudos:          z.coerce.number().min(0),
-  otros:            z.coerce.number().min(0),
+  pollo_entero:     z.coerce.number().min(0),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -52,7 +52,7 @@ export function RegistroProduccionForm({
       alitas:           0,
       carcasa:          0,
       menudos:          0,
-      otros:            0,
+      pollo_entero:     0,
     },
   });
 

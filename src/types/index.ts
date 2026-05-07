@@ -105,7 +105,7 @@ export interface Produccion {
   alitas: number;
   carcasa: number;
   menudos: number;
-  otros: number;
+  pollo_entero: number;
   peso_total_producido: number;
   rendimiento_real: number;
   tiene_alerta: boolean;
@@ -280,7 +280,7 @@ export interface ProduccionForm {
   alitas: number;
   carcasa: number;
   menudos: number;
-  otros: number;
+  pollo_entero: number;
 }
 
 export interface VentaItemForm {
