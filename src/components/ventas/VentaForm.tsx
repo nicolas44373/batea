@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { getProductoPorPlu, getStock, insertVenta } from "@/lib/supabase/queries";
-import { formatKilos, formatMoneda } from "@/lib/utils";
+import { formatKilos, formatMoneda, resolverScanBalanza } from "@/lib/utils";
 import type { Producto, VStockActual } from "@/types";
 
 const PRODUCTO_LABELS: Record<string, string> = {
@@ -114,6 +114,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     setScanError("");
     setScanResult(null);
     try {
+      const { pesoKg } = resolverScanBalanza(code);
       const prod = await getProductoPorPlu(code);
       if (!prod) {
         setScanError(`Código "${code}" no encontrado. Verificá el PLU.`);
@@ -132,7 +133,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         return;
       }
       setScanResult(prod);
-      setScanKilos("");
+      setScanKilos(pesoKg != null && pesoKg > 0 ? pesoKg.toFixed(3) : "");
       setScanPrecio(prod.precio_venta?.toString() ?? "");
       setPluInput("");
     } catch {

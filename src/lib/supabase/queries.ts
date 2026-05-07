@@ -1,4 +1,5 @@
 import { createClient } from "./client";
+import { candidatosCodigoBarrasParaPlu } from "@/lib/utils";
 import type {
   LoteCajones,
   OrdenDesposte,
@@ -357,16 +358,24 @@ export async function updateProductoPrecio(
   if (error) throw error;
 }
 
-export async function getProductoPorPlu(plu: string): Promise<Producto | null> {
+export async function getProductoPorPlu(pluRaw: string): Promise<Producto | null> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  const candidates = candidatosCodigoBarrasParaPlu(pluRaw);
+  if (!candidates.length) return null;
+
+  const { data: rows, error } = await supabase
     .from("productos")
     .select("*")
-    .eq("codigo_plu", plu.trim())
-    .eq("activo", true)
-    .maybeSingle();
+    .in("codigo_plu", candidates)
+    .eq("activo", true);
   if (error) throw error;
-  return data;
+  if (!rows?.length) return null;
+
+  for (const code of candidates) {
+    const hit = rows.find((p) => p.codigo_plu === code);
+    if (hit) return hit as Producto;
+  }
+  return null;
 }
 
 // ── MARCAS CONFIGURACIÓN ───────────────────────────────────────────────
@@ -494,13 +503,15 @@ export async function getVentasPorProducto(): Promise<VVentasPorProducto[]> {
   }> = {};
 
   for (const item of data ?? []) {
-    const nombre = (item.producto as { nombre: string } | null)?.nombre ?? "desconocido";
+    const productoRaw = Array.isArray(item.producto) ? item.producto[0] : item.producto;
+const nombre = (productoRaw as { nombre: string } | null)?.nombre ?? "desconocido";
     if (!map[nombre]) map[nombre] = { kilos: 0, ingreso: 0, precios: [], count: 0, fechas: [] };
     map[nombre].kilos   += item.kilos ?? 0;
     map[nombre].ingreso += item.subtotal ?? ((item.kilos ?? 0) * (item.precio_kg ?? 0));
     if (item.precio_kg) map[nombre].precios.push(item.precio_kg);
     map[nombre].count++;
-    const fecha = (item.venta as { created_at: string } | null)?.created_at;
+    const ventaRaw = Array.isArray(item.venta) ? item.venta[0] : item.venta;
+const fecha = (ventaRaw as { created_at: string } | null)?.created_at;
     if (fecha) map[nombre].fechas.push(fecha);
   }
 
