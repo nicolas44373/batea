@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -48,11 +48,16 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
 
   const {
     register,
+    control,
     handleSubmit,
     watch,
+    setValue,
     reset,
     formState: { errors },
-  } = useForm<FormData>({ resolver: zodResolver(schema) });
+  } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: { lote_id: "" },
+  });
 
   const loteId = watch("lote_id");
   const cantCajones = watch("cantidad_cajones");
@@ -98,6 +103,13 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
     if (!active) return;
     cargarLotes();
   }, [active, cargarLotes]);
+
+  /** Un solo lote: si el <select> muestra la única opción sin onChange, RHF queda con lote_id vacío y bloquea la cantidad. */
+  useEffect(() => {
+    if (loadingLotes || opciones.length !== 1) return;
+    const onlyId = opciones[0].lote.id;
+    setValue("lote_id", onlyId, { shouldValidate: true, shouldDirty: true });
+  }, [loadingLotes, opciones, setValue]);
 
   const pesoEstimadoNum =
     loteSeleccionado && cantCajones && loteSeleccionado.cantidad_cajones > 0
@@ -147,16 +159,23 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
         </Alert>
       ) : null}
 
-      <Select
-        label="Lote de cajones"
-        placeholder={loadingLotes ? "Cargando…" : "Seleccionar lote disponible"}
-        options={opciones.map(({ lote: l, cajonesEfectivos: eff }) => ({
-          value: l.id,
-          label: `${l.marca} — cal. ${l.calibre ?? "—"} — ${eff}/${l.cantidad_cajones} cajones libres · ${formatFecha(l.fecha)}`,
-        }))}
-        error={errors.lote_id?.message}
-        {...register("lote_id")}
-        disabled={loadingLotes || opciones.length === 0}
+      <Controller
+        name="lote_id"
+        control={control}
+        render={({ field }) => (
+          <Select
+            label="Lote de cajones"
+            placeholder={loadingLotes ? "Cargando…" : "Seleccionar lote disponible"}
+            options={opciones.map(({ lote: l, cajonesEfectivos: eff }) => ({
+              value: l.id,
+              label: `${l.marca} — cal. ${l.calibre ?? "—"} — ${eff}/${l.cantidad_cajones} cajones libres · ${formatFecha(l.fecha)}`,
+            }))}
+            error={errors.lote_id?.message}
+            disabled={loadingLotes || opciones.length === 0}
+            {...field}
+            value={field.value ?? ""}
+          />
+        )}
       />
 
       {opcionActual && loteSeleccionado && (
