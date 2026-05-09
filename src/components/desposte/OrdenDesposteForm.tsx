@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -45,7 +45,6 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
   const [loadingLotes, setLoadingLotes] = useState(true);
   const [operarios, setOperarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(false);
-  const [seleccion, setSeleccion] = useState<LoteOpcionDesposte | null>(null);
 
   const {
     register,
@@ -57,6 +56,13 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
 
   const loteId = watch("lote_id");
   const cantCajones = watch("cantidad_cajones");
+
+  const opcionActual = useMemo(
+    () => (loteId ? opciones.find((o) => o.lote.id === loteId) ?? null : null),
+    [loteId, opciones]
+  );
+  const loteSeleccionado = opcionActual?.lote;
+  const cajonesEfectivos = opcionActual?.cajonesEfectivos ?? 0;
 
   const cargarLotes = useCallback(async () => {
     setLoadingLotes(true);
@@ -93,18 +99,6 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
     cargarLotes();
   }, [active, cargarLotes]);
 
-  useEffect(() => {
-    if (loteId) {
-      const op = opciones.find((o) => o.lote.id === loteId) ?? null;
-      setSeleccion(op);
-    } else {
-      setSeleccion(null);
-    }
-  }, [loteId, opciones]);
-
-  const loteSeleccionado = seleccion?.lote;
-  const cajonesEfectivos = seleccion?.cajonesEfectivos ?? 0;
-
   const pesoEstimadoNum =
     loteSeleccionado && cantCajones && loteSeleccionado.cantidad_cajones > 0
       ? (loteSeleccionado.peso_total / loteSeleccionado.cantidad_cajones) * Number(cantCajones)
@@ -112,8 +106,9 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
   const pesoEstimado = pesoEstimadoNum > 0 ? pesoEstimadoNum.toFixed(2) : null;
 
   const onSubmit = async (data: FormData) => {
-    if (seleccion && data.cantidad_cajones > seleccion.cajonesEfectivos) {
-      toast.error(`Sólo hay ${seleccion.cajonesEfectivos} cajones libres para este lote`);
+    const elegida = opciones.find((o) => o.lote.id === data.lote_id);
+    if (elegida && data.cantidad_cajones > elegida.cajonesEfectivos) {
+      toast.error(`Sólo hay ${elegida.cajonesEfectivos} cajones libres para este lote`);
       return;
     }
     setLoading(true);
@@ -164,7 +159,7 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
         disabled={loadingLotes || opciones.length === 0}
       />
 
-      {seleccion && loteSeleccionado && (
+      {opcionActual && loteSeleccionado && (
         <div className="grid grid-cols-3 gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
           <div>
             <p className="text-gray-500 text-xs">Calibre</p>
@@ -193,15 +188,16 @@ export function OrdenDesposteForm({ usuarioId, onSuccess, active = true }: Orden
         <Input
           label="Cantidad de cajones a procesar"
           type="number"
-          min="1"
-          step="1"
-          placeholder="0"
+          inputMode="numeric"
+          placeholder="Ej. 10"
           hint={
-            seleccion ? `Máximo: ${cajonesEfectivos} (libres para asignar)` : undefined
+            loteId
+              ? `Máximo: ${cajonesEfectivos} (libres para asignar)`
+              : "Elegí primero un lote de la lista"
           }
           error={errors.cantidad_cajones?.message}
           {...register("cantidad_cajones")}
-          disabled={!seleccion}
+          disabled={!loteId}
         />
 
         {pesoEstimado && (
