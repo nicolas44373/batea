@@ -73,8 +73,6 @@ export default function StockPage() {
         ? stockActual - kilos
         : kilos; // ajuste = setea el valor exacto
 
-      if (nuevoStock < 0) { toast.error("El stock no puede quedar negativo"); setAjusteLoading(false); return; }
-
       await supabase.from("stock_productos")
         .update({ kilos: nuevoStock, updated_at: new Date().toISOString() })
         .eq("producto_id", ajusteProducto.producto_id);
@@ -106,7 +104,10 @@ export default function StockPage() {
     <div className="p-4 sm:p-6 space-y-5">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Stock / Batea</h1>
-        <p className="text-sm text-gray-500">Stock en tiempo real por producto</p>
+        <p className="text-sm text-gray-500">
+          Stock en tiempo real por producto. Se permiten saldos negativos (ventas antes del desposte); al registrar
+          producción el stock se actualiza y cierra la diferencia.
+        </p>
       </div>
 
       {/* Stock cards */}
@@ -130,7 +131,9 @@ export default function StockPage() {
             </p>
             <p
               className={`text-2xl font-bold mt-1 ${
-                s.kilos === 0
+                s.kilos < 0
+                  ? "text-red-700"
+                  : s.kilos === 0
                   ? "text-red-600"
                   : s.kilos < 10
                   ? "text-yellow-600"
@@ -139,6 +142,9 @@ export default function StockPage() {
             >
               {s.kilos.toFixed(1)} kg
             </p>
+            {s.kilos < 0 && (
+              <span className="text-xs text-red-700 font-medium">Negativo — pendiente conciliar con producción</span>
+            )}
             {s.kilos === 0 && (
               <span className="text-xs text-red-600 font-medium">Sin stock</span>
             )}
@@ -327,7 +333,6 @@ export default function StockPage() {
               <input
                 type="number"
                 step="0.001"
-                min="0"
                 value={ajusteKilos}
                 onChange={(e) => setAjusteKilos(e.target.value)}
                 placeholder="0.000"
@@ -338,7 +343,7 @@ export default function StockPage() {
                   Resultado: {
                     ajusteTipo === "ingreso"
                       ? (ajusteProducto.kilos + parseFloat(ajusteKilos || "0")).toFixed(3)
-                      : Math.max(0, ajusteProducto.kilos - parseFloat(ajusteKilos || "0")).toFixed(3)
+                      : (ajusteProducto.kilos - parseFloat(ajusteKilos || "0")).toFixed(3)
                   } kg
                 </p>
               )}

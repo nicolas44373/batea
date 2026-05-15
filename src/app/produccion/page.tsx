@@ -80,7 +80,10 @@ function ProduccionContent() {
     <div className="p-4 sm:p-6 space-y-5">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Producción — Desposte</h1>
-        <p className="text-sm text-gray-500">Registro de kilos obtenidos por corte</p>
+        <p className="text-sm text-gray-500">
+          Registro de kilos obtenidos por corte. Al confirmar, el stock de cortes se actualiza y compensa saldos negativos
+          por ventas previas.
+        </p>
       </div>
 
       {alertas.length > 0 && (

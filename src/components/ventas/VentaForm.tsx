@@ -125,9 +125,9 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       // Para productos personalizados con stock vinculado, verificar el stock de la fuente
       const stockCheckId = prod.stock_source_id ?? prod.id;
       const stockItem = stock.find((s) => s.producto_id === stockCheckId);
-      if (!stockItem || stockItem.kilos <= 0) {
+      if (!stockItem) {
         const nombre = PRODUCTO_LABELS[prod.nombre] ?? prod.nombre;
-        setScanError(`Sin stock disponible de ${nombre}.`);
+        setScanError(`No hay registro de stock para ${nombre}.`);
         setPluInput("");
         pluRef.current?.focus();
         return;
@@ -156,15 +156,6 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       toast.error("Ingresá los kilos");
       return;
     }
-    // Chequear stock usando la fuente vinculada si existe
-    const stockCheckId = scanResult.stock_source_id ?? scanResult.id;
-    const stockItem = stock.find((s) => s.producto_id === stockCheckId);
-    if (stockItem && kilos > stockItem.kilos) {
-      toast.error(`Máximo disponible: ${formatKilos(stockItem.kilos)}`);
-      return;
-    }
-
-    let precio_kg: number;
     let promoTotal = 0;
     let isPromo = false;
 
@@ -214,23 +205,22 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     setCart((prev) => prev.map((item, i) => i === idx ? { ...item, precio_kg: value } : item));
   };
 
-  const stockErrors: Record<number, string> = {};
+  const stockWarnings: Record<number, string> = {};
   cart.forEach((item, i) => {
     const checkId = item.stockProductoId ?? item.producto.id;
     const s = stock.find((s) => s.producto_id === checkId);
     if (s && item.kilos > s.kilos) {
-      stockErrors[i] = `Máx: ${s.kilos.toFixed(2)} kg`;
+      stockWarnings[i] = `Supera stock registrado (${s.kilos.toFixed(2)} kg) — saldo negativo permitido hasta conciliar producción`;
     }
   });
 
   const totalKilos = cart.reduce((s, i) => s + i.kilos, 0);
   const totalMonto = cart.reduce((s, i) => s + (i.isPromo ? i.promoTotal : i.kilos * i.precio_kg), 0);
-  const hasErrors  = Object.keys(stockErrors).length > 0;
+  const hasStockWarnings = Object.keys(stockWarnings).length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) { toast.error("Agregá al menos un producto"); return; }
-    if (hasErrors) { toast.error("Hay ítems con stock insuficiente"); return; }
     setLoading(true);
     try {
       await insertVenta(
@@ -322,6 +312,17 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
           {/* Panel del producto escaneado */}
           {scanResult && (
             <div className={`border-2 rounded-xl p-4 space-y-3 ${promoMode ? "border-purple-400 bg-purple-50" : "border-green-400 bg-green-50"}`}>
+              {(() => {
+                const sid = scanResult.stock_source_id ?? scanResult.id;
+                const si = stock.find((s) => s.producto_id === sid);
+                if (!si || si.kilos > 0) return null;
+                return (
+                  <Alert variant="warning" className="py-2">
+                    Stock actual {formatKilos(si.kilos)}. Podés vender igual; el saldo puede quedar negativo hasta registrar
+                    la producción.
+                  </Alert>
+                );
+              })()}
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
                   <p className={`text-xs font-medium uppercase tracking-wide ${promoMode ? "text-purple-600" : "text-green-600"}`}>
@@ -468,7 +469,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
           <p className="text-xs font-medium text-gray-600">Seleccioná un producto:</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {stock
-              .filter((s) => s.kilos > 0 && PRODUCTOS_BATEA_VENTA.has(s.producto))
+              .filter((s) => PRODUCTOS_BATEA_VENTA.has(s.producto))
               .sort((a, b) => {
                 const orden = ["filet_fresco", "pata_muslo_fresca", "pechuga_con_piel"];
                 const ia = orden.indexOf(a.producto);
@@ -504,7 +505,13 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                   <span className="text-sm font-semibold text-gray-900">
                     {PRODUCTO_LABELS[s.producto] ?? s.producto}
                   </span>
-                  <span className="text-xs text-green-700 font-medium">{formatKilos(s.kilos)} disp.</span>
+                  <span
+                    className={`text-xs font-medium ${
+                      s.kilos < 0 ? "text-red-700" : s.kilos <= 0 ? "text-amber-700" : "text-green-700"
+                    }`}
+                  >
+                    {formatKilos(s.kilos)} disp.
+                  </span>
                 </button>
               ))}
           </div>
@@ -533,8 +540,8 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                       </span>
                     )}
                   </div>
-                  {stockErrors[i] && (
-                    <p className="text-xs text-red-600">{stockErrors[i]}</p>
+                  {stockWarnings[i] && (
+                    <p className="text-xs text-amber-700">{stockWarnings[i]}</p>
                   )}
                 </div>
 
@@ -546,7 +553,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                   value={item.kilos}
                   onChange={(e) => updateCartKilos(i, parseFloat(e.target.value) || 0)}
                   className={`w-20 rounded border px-2 py-1 text-sm font-mono text-right
-                    ${stockErrors[i] ? "border-red-400" : item.isPromo ? "border-purple-300" : "border-gray-300"}`}
+                    ${stockWarnings[i] ? "border-amber-400" : item.isPromo ? "border-purple-300" : "border-gray-300"}`}
                 />
                 <span className="text-xs text-gray-400">kg</span>
 
@@ -602,8 +609,11 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         </div>
       )}
 
-      {hasErrors && (
-        <Alert variant="danger">Hay productos con stock insuficiente. Ajustá las cantidades.</Alert>
+      {hasStockWarnings && (
+        <Alert variant="warning">
+          Hay líneas que superan el stock mostrado. La venta se registrará y el saldo puede quedar negativo hasta que el
+          operario cargue la producción del desposte.
+        </Alert>
       )}
 
       <Input
@@ -617,7 +627,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         type="submit"
         loading={loading}
         fullWidth
-        disabled={cart.length === 0 || hasErrors}
+        disabled={cart.length === 0}
       >
         Confirmar venta {cart.length > 0 ? `(${cart.length} ítem${cart.length !== 1 ? "s" : ""})` : ""}
       </Button>

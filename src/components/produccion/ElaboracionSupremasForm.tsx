@@ -66,10 +66,6 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
     stockFilet !== undefined && kilosFilet > stockFilet.kilos;
 
   const onSubmit = async (data: FormData) => {
-    if (stockInsuficiente) {
-      toast.error(`Stock insuficiente de ${tipoFilet}`);
-      return;
-    }
     setLoading(true);
     try {
       await insertElaboracionSupremas({
@@ -124,9 +120,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
           placeholder="0.000"
           hint={stockFilet ? `Disponible: ${formatKilos(stockFilet.kilos)}` : undefined}
           error={
-            stockInsuficiente
-              ? `Máximo disponible: ${formatKilos(stockFilet!.kilos)}`
-              : errors.kilos_filet?.message
+            errors.kilos_filet?.message
           }
           {...register("kilos_filet")}
         />
@@ -142,6 +136,13 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
           {...register("kilos_supremas")}
         />
       </div>
+
+      {stockInsuficiente && stockFilet && (
+        <Alert variant="warning">
+          Superás el filet mostrado en stock ({formatKilos(stockFilet.kilos)}). Podés registrar igual; el saldo puede
+          quedar negativo y se alinea con los movimientos del proceso.
+        </Alert>
+      )}
 
       {/* Rendimiento en tiempo real */}
       {rendimiento !== null && (
@@ -193,7 +194,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
         {...register("notas")}
       />
 
-      <Button type="submit" loading={loading} fullWidth disabled={stockInsuficiente}>
+      <Button type="submit" loading={loading} fullWidth>
         Registrar elaboración
       </Button>
     </form>

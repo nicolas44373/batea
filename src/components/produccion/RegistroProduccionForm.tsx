@@ -79,7 +79,10 @@ export function RegistroProduccionForm({
         registrado_por: usuarioId,
         ...data,
       });
-      toast.success("Producción registrada correctamente");
+      toast.success("Producción registrada correctamente", {
+        description:
+          "El stock de cada corte se actualizó en el sistema. Si había ventas previas que dejaron saldo negativo, este registro lo compensa.",
+      });
       onSuccess?.();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al registrar producción";
