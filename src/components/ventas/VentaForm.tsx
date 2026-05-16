@@ -156,6 +156,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       toast.error("Ingresá los kilos");
       return;
     }
+    let precio_kg: number;
     let promoTotal = 0;
     let isPromo = false;
 
