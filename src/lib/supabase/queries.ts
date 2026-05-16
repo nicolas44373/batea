@@ -328,7 +328,14 @@ export async function insertVenta(
 
   const itemsPayload = items.map((i) => ({ ...i, venta_id: venta.id }));
   const { error: eItems } = await supabase.from("venta_items").insert(itemsPayload);
-  if (eItems) throw eItems;
+  if (eItems) {
+    // Intentar revertir la cabecera de venta para no dejar registros huérfanos
+    await supabase.from("ventas").delete().eq("id", venta.id);
+    const detail = (eItems as { message?: string; details?: string; hint?: string });
+    throw new Error(
+      detail.message ?? "Error al guardar los ítems de la venta"
+    );
+  }
 
   return venta;
 }
