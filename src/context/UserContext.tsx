@@ -34,29 +34,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const supabase = createClient();
+    let cancelled = false;
 
-    const load = async () => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError) {
-        // AuthSessionMissingError es esperado cuando no hay sesión activa (ej: página de login).
-        // No lo mostramos como error — simplemente no hay usuario.
-        if (authError.name !== "AuthSessionMissingError") {
-          console.error("[UserContext] auth.getUser error:", authError);
-        }
-        setValue((v) => ({ ...v, loaded: true, profileError: null }));
-        return;
-      }
-      if (!user) {
-        setValue((v) => ({ ...v, loaded: true }));
-        return;
-      }
-
+    const loadProfile = async (userId: string, email: string | undefined) => {
       const { data: profile, error: profileError } = await supabase
         .from("usuarios")
         .select("nombre, rol")
-        .eq("id", user.id)
+        .eq("id", userId)
         .maybeSingle();
+
+      if (cancelled) return;
 
       if (profileError) {
         console.error("[UserContext] query usuarios error:", profileError);
@@ -65,8 +52,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const rol = (profile?.rol ?? "operario") as UserRole;
 
       setValue({
-        userId:      user.id,
-        userName:    profile?.nombre ?? user.email ?? "",
+        userId,
+        userName:    profile?.nombre ?? email ?? "",
         userRole:    rol,
         isAdmin:     rol === "admin",
         loaded:      true,
@@ -74,20 +61,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       });
     };
 
-    load();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
+    // onAuthStateChange dispara inmediatamente con INITIAL_SESSION al suscribirse,
+    // evitando llamar a getUser() por separado y el conflicto de locks.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
         setValue({
           userId: "", userName: "", userRole: "operario",
           isAdmin: false, loaded: true, profileError: null,
         });
       } else {
-        load();
+        loadProfile(session.user.id, session.user.email ?? undefined);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
