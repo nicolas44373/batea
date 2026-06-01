@@ -44,7 +44,7 @@ export function ListaCajones({ lotes, loading, onRefresh }: ListaCajonesProps) {
     try {
       await updateLote(editTarget.id, {
         marca: editForm.marca,
-        calibre: editForm.calibre ? Number(editForm.calibre) : undefined,
+        calibre: editForm.calibre ? editForm.calibre : undefined,
         peso_total: Number(editForm.peso_total),
         cantidad_cajones: Number(editForm.cantidad_cajones),
         costo_por_cajon: editForm.costo_por_cajon ? Number(editForm.costo_por_cajon) : 0,

@@ -11,6 +11,7 @@ import type {
   Usuario,
   VAlertasProduccion,
   ElaboracionSupremas,
+  OrdenElaboracionSupremas,
   Producto,
   MarcaConfiguracion,
   VRentabilidadLote,
@@ -447,6 +448,52 @@ export async function insertElaboracionSupremas(
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function getOrdenesElaboracionSupremas(): Promise<OrdenElaboracionSupremas[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("ordenes_elaboracion_supremas")
+    .select(`
+      *,
+      registrado_por_usuario:usuarios!ordenes_elaboracion_supremas_registrado_por_fkey(id,nombre),
+      operario:usuarios!ordenes_elaboracion_supremas_operario_id_fkey(id,nombre)
+    `)
+    .order("fecha_inicio", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function insertOrdenElaboracionSupremas(
+  payload: Omit<OrdenElaboracionSupremas, "id" | "kilos_procesados" | "kilos_supremas" | "kilos_devueltos" | "estado" | "fecha_inicio" | "fecha_fin" | "created_at" | "registrado_por_usuario" | "operario">
+): Promise<OrdenElaboracionSupremas> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("ordenes_elaboracion_supremas")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function finalizarOrdenElaboracionSupremas(
+  id: string,
+  kilosDevueltos: number,
+  notas?: string
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("ordenes_elaboracion_supremas")
+    .update({
+      estado: "completada",
+      kilos_devueltos: kilosDevueltos,
+      notas: notas || null,
+      fecha_fin: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 // ── PRODUCTOS (con precio y PLU) ───────────────────────────────────────

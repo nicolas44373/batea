@@ -146,6 +146,26 @@ export interface ElaboracionSupremas {
   notas?: string;
   fecha_elaboracion: string;
   created_at: string;
+  orden_elaboracion_id?: string;
+  // joins
+  registrado_por_usuario?: Usuario;
+  operario?: Usuario;
+}
+
+export interface OrdenElaboracionSupremas {
+  id: string;
+  tipo_filet: TipoFilet;
+  kilos_separados: number;
+  kilos_procesados: number;
+  kilos_supremas: number;
+  kilos_devueltos: number;
+  estado: "en_proceso" | "completada" | "cancelada";
+  registrado_por: string;
+  operario_id?: string;
+  notas?: string;
+  fecha_inicio: string;
+  fecha_fin?: string;
+  created_at: string;
   // joins
   registrado_por_usuario?: Usuario;
   operario?: Usuario;

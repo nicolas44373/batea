@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,39 +10,59 @@ import { Input, Select } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { getStock, getUsuarios, insertElaboracionSupremas } from "@/lib/supabase/queries";
 import { formatKilos, rendimientoBg, rendimientoColor } from "@/lib/utils";
-import type { VStockActual, Usuario } from "@/types";
+import type { VStockActual, Usuario, OrdenElaboracionSupremas } from "@/types";
 
 const TIPOS_FILET = [
   { value: "filet_fresco",   label: "Filet fresco" },
   { value: "filet_congelado",label: "Filet congelado" },
 ] as const;
 
-const schema = z.object({
-  tipo_filet:     z.enum(["pechuga", "filet_fresco", "filet_congelado"]),
-  kilos_filet:    z.coerce.number().positive("Debe ser mayor a 0"),
-  kilos_supremas: z.coerce.number().positive("Debe ser mayor a 0"),
-  operario_id:    z.string().optional(),
-  notas:          z.string().optional(),
-});
-
-type FormData = z.infer<typeof schema>;
-
 interface Props {
   usuarioId: string;
+  orden?: OrdenElaboracionSupremas;
   onSuccess?: () => void;
 }
 
-export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
+export function ElaboracionSupremasForm({ usuarioId, orden, onSuccess }: Props) {
   const [stock, setStock]         = useState<VStockActual[]>([]);
   const [operarios, setOperarios] = useState<Usuario[]>([]);
   const [loading, setLoading]     = useState(false);
+
+  // Schema reactivo según si hay orden o no
+  const schema = useMemo(() => {
+    const o = orden;
+    return z.object({
+      tipo_filet:     z.enum(["pechuga", "filet_fresco", "filet_congelado"]),
+      kilos_filet:    z.coerce.number().positive("Debe ser mayor a 0").refine(
+        (val) => {
+          if (!o) return true;
+          const restante = o.kilos_separados - o.kilos_procesados;
+          // Pequeño margen de tolerancia para decimales (1 gramo)
+          return val <= (restante + 0.001);
+        },
+        {
+          message: `Supera el restante disponible en el lote (${formatKilos(
+            o ? Math.max(0, o.kilos_separados - o.kilos_procesados) : 0
+          )})`,
+        }
+      ),
+      kilos_supremas: z.coerce.number().positive("Debe ser mayor a 0"),
+      operario_id:    z.string().optional(),
+      notes:          z.string().optional(), // mapea a notas en onSubmit
+    });
+  }, [orden]);
+
+  type FormData = z.infer<typeof schema>;
 
   const {
     register, handleSubmit, watch, reset,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { tipo_filet: "filet_fresco" },
+    defaultValues: {
+      tipo_filet: orden ? orden.tipo_filet : "filet_fresco",
+      operario_id: orden ? orden.operario_id : undefined,
+    },
   });
 
   const tipoFilet    = watch("tipo_filet");
@@ -62,14 +82,20 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
       ? Math.round((kilosSuprem / kilosFilet) * 1000) / 10
       : null;
 
+  // Solo se evalúa si NO hay orden (registro directo)
   const stockInsuficiente =
-    stockFilet !== undefined && kilosFilet > stockFilet.kilos;
+    !orden && stockFilet !== undefined && kilosFilet > stockFilet.kilos;
 
   const onSubmit = async (data: FormData) => {
     setLoading(true);
     try {
       await insertElaboracionSupremas({
-        ...data,
+        tipo_filet: data.tipo_filet,
+        kilos_filet: data.kilos_filet,
+        kilos_supremas: data.kilos_supremas,
+        operario_id: data.operario_id || undefined,
+        notas: data.notes || undefined,
+        orden_elaboracion_id: orden ? orden.id : undefined,
         registrado_por: usuarioId,
       });
       toast.success("Elaboración de supremas registrada");
@@ -89,26 +115,45 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
       {/* Tipo de filet */}
       <div>
         <p className="text-sm font-medium text-gray-700 mb-2">Materia prima (filet de origen)</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {TIPOS_FILET.map((t) => (
-            <label
-              key={t.value}
-              className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-all ${
-                tipoFilet === t.value
-                  ? "border-brand-500 bg-brand-50 ring-2 ring-brand-300"
-                  : "border-gray-200 bg-white hover:border-gray-300"
-              }`}
-            >
-              <input type="radio" value={t.value} {...register("tipo_filet")} className="sr-only" />
-              <span className="text-sm font-semibold text-gray-900">{t.label}</span>
-              {stockFilet && t.value === tipoFilet && (
-                <span className={`text-xs font-medium ${stockFilet.kilos < 1 ? "text-red-600" : "text-green-700"}`}>
-                  Stock: {formatKilos(stockFilet.kilos)}
-                </span>
-              )}
-            </label>
-          ))}
-        </div>
+        {orden ? (
+          <div className="bg-brand-50 border border-brand-200 rounded-lg p-3.5 text-sm">
+            <p className="text-brand-900 font-semibold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></span>
+              Procesando sobre Lote Activo
+            </p>
+            <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-brand-800">
+              <p>
+                Materia prima: <strong className="font-semibold">{orden.tipo_filet === "filet_fresco" ? "Filet fresco" : "Filet congelado"}</strong>
+              </p>
+              <p>
+                Restante en lote: <strong className="font-semibold">{formatKilos(Math.max(0, orden.kilos_separados - orden.kilos_procesados))}</strong>
+              </p>
+            </div>
+            {/* Campo oculto para mantener tipo_filet en el form state */}
+            <input type="hidden" value={orden.tipo_filet} {...register("tipo_filet")} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {TIPOS_FILET.map((t) => (
+              <label
+                key={t.value}
+                className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-all ${
+                  tipoFilet === t.value
+                    ? "border-brand-500 bg-brand-50 ring-2 ring-brand-300"
+                    : "border-gray-200 bg-white hover:border-gray-300"
+                }`}
+              >
+                <input type="radio" value={t.value} {...register("tipo_filet")} className="sr-only" />
+                <span className="text-sm font-semibold text-gray-900">{t.label}</span>
+                {stockFilet && t.value === tipoFilet && (
+                  <span className={`text-xs font-medium ${stockFilet.kilos < 1 ? "text-red-600" : "text-green-700"}`}>
+                    Stock: {formatKilos(stockFilet.kilos)}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -118,10 +163,14 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
           step="0.001"
           min="0.001"
           placeholder="0.000"
-          hint={stockFilet ? `Disponible: ${formatKilos(stockFilet.kilos)}` : undefined}
-          error={
-            errors.kilos_filet?.message
+          hint={
+            orden
+              ? `Máximo disponible en lote: ${formatKilos(Math.max(0, orden.kilos_separados - orden.kilos_procesados))}`
+              : stockFilet
+              ? `Disponible: ${formatKilos(stockFilet.kilos)}`
+              : undefined
           }
+          error={errors.kilos_filet?.message}
           {...register("kilos_filet")}
         />
 
@@ -139,8 +188,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
 
       {stockInsuficiente && stockFilet && (
         <Alert variant="warning">
-          Superás el filet mostrado en stock ({formatKilos(stockFilet.kilos)}). Podés registrar igual; el saldo puede
-          quedar negativo y se alinea con los movimientos del proceso.
+          Superás el filet mostrado en stock ({formatKilos(stockFilet.kilos)}). El saldo de stock del filet quedará negativo en el sistema.
         </Alert>
       )}
 
@@ -160,7 +208,7 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
             <div className="text-right">
               <p className="text-xs text-gray-500">Merma</p>
               <p className="text-lg font-semibold text-gray-700">
-                {(kilosFilet - kilosSuprem).toFixed(3)} kg
+                {Math.max(0, kilosFilet - kilosSuprem).toFixed(3)} kg
               </p>
               <p className="text-xs text-gray-400">
                 ({(100 - rendimiento).toFixed(1)}%)
@@ -191,11 +239,11 @@ export function ElaboracionSupremasForm({ usuarioId, onSuccess }: Props) {
       <Input
         label="Notas (opcional)"
         placeholder="Observaciones del proceso..."
-        {...register("notas")}
+        {...register("notes")}
       />
 
       <Button type="submit" loading={loading} fullWidth>
-        Registrar elaboración
+        Registrar pesada
       </Button>
     </form>
   );

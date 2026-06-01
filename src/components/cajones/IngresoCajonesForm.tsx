@@ -29,7 +29,7 @@ const schema = z.object({
   calibre: z.string().optional(),
   peso_total: z.coerce.number().positive("Debe ser mayor a 0"),
   cantidad_cajones: z.coerce.number().int().positive("Debe ser mayor a 0"),
-  costo_por_cajon: z.coerce.number().min(0).default(0),
+  costo_por_cajon: z.coerce.number().min(0),
   fecha: z.string().min(1, "Requerido"),
   notas: z.string().optional(),
 }).superRefine((data, ctx) => {

@@ -110,6 +110,14 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     }
   };
 
+  const resetScanPanel = () => {
+    setScanResult(null);
+    setScanKilos("");
+    setScanPrecio("");
+    setScanPromoTotal("");
+    setPromoMode(false);
+  };
+
   const buscarProducto = async (code: string) => {
     setScanError("");
     setScanResult(null);
@@ -132,21 +140,48 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         pluRef.current?.focus();
         return;
       }
-      setScanResult(prod);
-      setScanKilos(pesoKg != null && pesoKg > 0 ? pesoKg.toFixed(3) : "");
-      setScanPrecio(prod.precio_venta?.toString() ?? "");
-      setPluInput("");
+
+      if (pesoKg != null && pesoKg > 0) {
+        // Agregar directamente al carrito
+        const kilos = pesoKg;
+        let precio_kg = prod.precio_venta || 0;
+        let isPromo = prod.precio_fijo === true;
+        let promoTotal = 0;
+
+        if (isPromo) {
+          promoTotal = prod.precio_venta || 0;
+          precio_kg = promoTotal / kilos;
+        }
+
+        const stockProductoId = prod.stock_source_id ?? undefined;
+
+        setCart((prev) => {
+          const existing = !isPromo ? prev.findIndex((c) => c.producto.id === prod.id && !c.isPromo) : -1;
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = { ...updated[existing], kilos: updated[existing].kilos + kilos };
+            return updated;
+          } else {
+            return [...prev, { producto: prod, kilos, precio_kg, isPromo, promoTotal, stockProductoId }];
+          }
+        });
+
+        toast.success(`${PRODUCTO_LABELS[prod.nombre] ?? prod.nombre} agregado (${formatKilos(kilos)})`);
+        setPluInput("");
+        resetScanPanel();
+        setTimeout(() => {
+          if (pluRef.current) pluRef.current.focus();
+        }, 100);
+      } else {
+        // Carga manual / PLU sin peso: requiere confirmación
+        setScanResult(prod);
+        setScanKilos("");
+        setScanPrecio(prod.precio_venta?.toString() ?? "");
+        setPluInput("");
+      }
     } catch {
       setScanError("Error al buscar el producto.");
     }
-  };
-
-  const resetScanPanel = () => {
-    setScanResult(null);
-    setScanKilos("");
-    setScanPrecio("");
-    setScanPromoTotal("");
-    setPromoMode(false);
   };
 
   const agregarAlCarrito = () => {
