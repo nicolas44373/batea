@@ -16,6 +16,8 @@ import type {
   MarcaConfiguracion,
   VRentabilidadLote,
   VVentasPorProducto,
+  Proveedor,
+  Remito,
 } from "@/types";
 
 /** Fila DB puede usar `pollo_entero` o la columna legacy `otros`. */
@@ -513,17 +515,46 @@ export async function updateProductoPrecio(
   precio_venta: number | null,
   codigo_plu: string | null,
   stock_source_id?: string | null,
-  precio_fijo?: boolean
+  precio_fijo?: boolean,
+  nombre?: string
 ): Promise<void> {
   const supabase = createClient();
   const payload: Record<string, unknown> = { precio_venta, codigo_plu };
   if (stock_source_id !== undefined) payload.stock_source_id = stock_source_id;
   if (precio_fijo !== undefined) payload.precio_fijo = precio_fijo;
+  if (nombre !== undefined) payload.nombre = nombre;
   const { error } = await supabase
     .from("productos")
     .update(payload)
     .eq("id", id);
-  if (error) throw error;
+  if (error) {
+    if (isUniqueConflict(error)) {
+      throw new Error(
+        "Ya existe un producto con el mismo nombre o código PLU."
+      );
+    }
+    throw error;
+  }
+}
+
+export async function deleteProducto(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("productos")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    // Si falla por restricción de clave foránea (ej: tiene ventas o remitos), hacer soft delete
+    if (error.code === "23503") {
+      const { error: errUpdate } = await supabase
+        .from("productos")
+        .update({ activo: false })
+        .eq("id", id);
+      if (errUpdate) throw errUpdate;
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function getProductoPorPlu(pluRaw: string): Promise<Producto | null> {
@@ -737,3 +768,119 @@ export async function insertProducto(payload: {
 
   return prod;
 }
+
+// ── PROVEEDORES ─────────────────────────────────────────────────────────
+export async function getProveedores(): Promise<Proveedor[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("proveedores")
+    .select("*")
+    .eq("activo", true)
+    .order("nombre");
+  if (error) throw error;
+  return data;
+}
+
+export async function getProveedoresAll(): Promise<Proveedor[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("proveedores")
+    .select("*")
+    .order("nombre");
+  if (error) throw error;
+  return data;
+}
+
+export async function insertProveedor(
+  payload: Omit<Proveedor, "id" | "activo" | "created_at" | "updated_at">
+): Promise<Proveedor> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("proveedores")
+    .insert({ ...payload, activo: true })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateProveedor(
+  id: string,
+  payload: Partial<Omit<Proveedor, "id" | "created_at" | "updated_at">>
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("proveedores")
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteProveedor(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("proveedores")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    // Si falla por restricción de clave foránea, hacer soft delete (desactivar)
+    if (error.code === "23503") {
+      const { error: errUpdate } = await supabase
+        .from("proveedores")
+        .update({ activo: false, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (errUpdate) throw errUpdate;
+      return;
+    }
+    throw error;
+  }
+}
+
+// ── REMITOS ─────────────────────────────────────────────────────────────
+export async function getRemitos(): Promise<Remito[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("remitos")
+    .select(`
+      *,
+      proveedor:proveedores(id,nombre),
+      usuario:usuarios(id,nombre),
+      items:remito_items(
+        *,
+        producto:productos(id,nombre)
+      )
+    `)
+    .order("fecha", { ascending: false });
+  if (error) throw error;
+  return data as unknown as Remito[];
+}
+
+export async function insertRemito(
+  remitoPayload: { proveedor_id: string; numero_remito: string; fecha?: string; registrado_por: string; notas?: string },
+  items: { producto_id: string; kilos: number; precio_costo?: number; costo_total?: number }[]
+): Promise<Remito> {
+  const supabase = createClient();
+
+  // 1. Insertar cabecera de remito
+  const { data: remito, error: eRemito } = await supabase
+    .from("remitos")
+    .insert(remitoPayload)
+    .select()
+    .single();
+  if (eRemito) throw eRemito;
+
+  // 2. Insertar ítems del remito
+  const itemsPayload = items.map((i) => ({ ...i, remito_id: remito.id }));
+  const { error: eItems } = await supabase
+    .from("remito_items")
+    .insert(itemsPayload);
+
+  if (eItems) {
+    // Revertir cabecera para no dejar huérfanos
+    await supabase.from("remitos").delete().eq("id", remito.id);
+    throw eItems;
+  }
+
+  return remito;
+}
+

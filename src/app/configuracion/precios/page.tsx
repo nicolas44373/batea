@@ -8,8 +8,11 @@ import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
-import { getProductos, insertProducto, updateProductoPrecio } from "@/lib/supabase/queries";
-import { formatMoneda } from "@/lib/utils";
+import { getProductos, insertProducto, updateProductoPrecio, deleteProducto } from "@/lib/supabase/queries";
+import { formatMoneda, getProductoLabel } from "@/lib/utils";
+import { useCurrentUser } from "@/context/UserContext";
+import { AdminOnly } from "@/components/ui/AdminOnly";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { Producto } from "@/types";
 
 // Labels para productos del sistema
@@ -31,7 +34,7 @@ const SISTEMA_LABELS: Record<string, string> = {
 const PRODUCTOS_SISTEMA = Object.keys(SISTEMA_LABELS);
 
 function getNombreDisplay(prod: Producto): string {
-  return SISTEMA_LABELS[prod.nombre] ?? prod.nombre;
+  return getProductoLabel(prod.nombre);
 }
 
 interface PrecioEdit {
@@ -47,7 +50,7 @@ export default function PreciosPage() {
   const [saving, setSaving]           = useState<Record<string, boolean>>({});
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState<string | null>(null);
-  const [modalOpen, setModalOpen]     = useState(false);
+  const [modalType, setModalType]     = useState<"original" | "promo" | null>(null);
 
   // Nuevo producto
   const [newNombre, setNewNombre]             = useState("");
@@ -57,6 +60,15 @@ export default function PreciosPage() {
   const [newPrecioFijo, setNewPrecioFijo]     = useState(false);
   const [creating, setCreating]               = useState(false);
   const nombreRef                             = useRef<HTMLInputElement>(null);
+
+  // Renombrar producto
+  const [renamingTarget, setRenamingTarget]   = useState<Producto | null>(null);
+  const [newNameValue, setNewNameValue]       = useState("");
+  const [renaming, setRenaming]               = useState(false);
+
+  // Eliminar producto
+  const [deletingTarget, setDeletingTarget]   = useState<Producto | null>(null);
+  const [deleting, setDeleting]               = useState(false);
 
   const fetchProductos = useCallback(async () => {
     setLoading(true);
@@ -85,8 +97,8 @@ export default function PreciosPage() {
   useEffect(() => { fetchProductos(); }, [fetchProductos]);
 
   useEffect(() => {
-    if (modalOpen) setTimeout(() => nombreRef.current?.focus(), 100);
-  }, [modalOpen]);
+    if (modalType) setTimeout(() => nombreRef.current?.focus(), 100);
+  }, [modalType]);
 
   // ── Guardar precio/PLU ──────────────────────────────────────────────
   const handleSave = async (producto: Producto) => {
@@ -136,11 +148,14 @@ export default function PreciosPage() {
   const handleCreate = async () => {
     if (!newNombre.trim()) { toast.error("Ingresá el nombre del producto"); return; }
     if (!newPlu.trim())    { toast.error("Ingresá el código PLU"); return; }
+    if (modalType === "promo" && !newStockSource) {
+      toast.error("Seleccioná de qué producto descuenta stock esta promo");
+      return;
+    }
 
     const base = toSlug(newNombre);
-    const pluPart = toSlug(newPlu.trim()) || "plu";
-    const slug = base ? `${base}_${pluPart}` : pluPart;
-    if (!slug) { toast.error("El nombre no es válido"); return; }
+    if (!base) { toast.error("El nombre no es válido"); return; }
+    const slug = base;
 
     setCreating(true);
     try {
@@ -150,13 +165,17 @@ export default function PreciosPage() {
         precio_venta:    newPrecio ? parseFloat(newPrecio) : undefined,
       });
       // Si hay configuración extra (stock_source o precio_fijo), actualizar
-      if (newStockSource || newPrecioFijo) {
+      // Para tipo original, stock_source es null por defecto
+      const stockSourceId = modalType === "promo" ? newStockSource : null;
+      const precioFijoVal = modalType === "promo" ? newPrecioFijo : false;
+
+      if (stockSourceId || precioFijoVal) {
         await updateProductoPrecio(
           prod.id,
           newPrecio ? parseFloat(newPrecio) : null,
           newPlu.trim() || null,
-          newStockSource || null,
-          newPrecioFijo
+          stockSourceId || null,
+          precioFijoVal
         );
       }
       toast.success(`Producto "${newNombre}" creado`);
@@ -165,7 +184,7 @@ export default function PreciosPage() {
       setNewPrecio("");
       setNewStockSource("");
       setNewPrecioFijo(false);
-      setModalOpen(false);
+      setModalType(null);
       fetchProductos();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al crear producto";
@@ -175,9 +194,59 @@ export default function PreciosPage() {
     }
   };
 
-  // Separar productos del sistema de los personalizados
-  const prodSistema      = productos.filter((p) => PRODUCTOS_SISTEMA.includes(p.nombre));
-  const prodPersonalizados = productos.filter((p) => !PRODUCTOS_SISTEMA.includes(p.nombre));
+  const handleRename = async () => {
+    if (!renamingTarget) return;
+    if (!newNameValue.trim()) {
+      toast.error("Ingresá un nombre válido");
+      return;
+    }
+    const base = toSlug(newNameValue);
+    if (!base) {
+      toast.error("El nombre no es válido");
+      return;
+    }
+    setRenaming(true);
+    try {
+      const edit = edits[renamingTarget.id];
+      await updateProductoPrecio(
+        renamingTarget.id,
+        edit?.precio_venta ? parseFloat(edit.precio_venta) : null,
+        edit?.codigo_plu.trim() || null,
+        edit?.stock_source_id || null,
+        edit?.precio_fijo || false,
+        base
+      );
+      toast.success(`Producto renombrado a "${newNameValue}"`);
+      setRenamingTarget(null);
+      setNewNameValue("");
+      fetchProductos();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al renombrar";
+      toast.error(msg);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleDeleteProducto = async () => {
+    if (!deletingTarget) return;
+    setDeleting(true);
+    try {
+      await deleteProducto(deletingTarget.id);
+      toast.success(`Producto "${getNombreDisplay(deletingTarget)}" eliminado`);
+      setDeletingTarget(null);
+      fetchProductos();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al eliminar";
+      toast.error(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Separar productos originales (los de sistema + nuevos sin vincular) de las promos (los vinculados)
+  const prodSistema      = productos.filter((p) => p.stock_source_id == null);
+  const prodPersonalizados = productos.filter((p) => p.stock_source_id != null);
   const totalCambiados   = productos.filter((p) => hasChange(p)).length;
 
   // ── Render ──────────────────────────────────────────────────────────
@@ -190,16 +259,29 @@ export default function PreciosPage() {
             Configurá el precio por kilo y el código PLU de cada producto para la pistola lectora.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {totalCambiados > 0 && (
-            <Button variant="primary" onClick={handleSaveAll}>
-              Guardar todos ({totalCambiados})
+        <AdminOnly>
+          <div className="flex flex-wrap gap-2">
+            {totalCambiados > 0 && (
+              <Button variant="primary" onClick={handleSaveAll}>
+                Guardar todos ({totalCambiados})
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => {
+              setNewStockSource("");
+              setNewPrecioFijo(false);
+              setModalType("original");
+            }}>
+              + Nuevo original
             </Button>
-          )}
-          <Button variant="outline" onClick={() => setModalOpen(true)}>
-            + Nuevo producto
-          </Button>
-        </div>
+            <Button variant="outline" onClick={() => {
+              setNewStockSource("");
+              setNewPrecioFijo(true);
+              setModalType("promo");
+            }}>
+              + Nueva promo
+            </Button>
+          </div>
+        </AdminOnly>
       </div>
 
       {error && (
@@ -223,7 +305,7 @@ export default function PreciosPage() {
             <CardHeader
               actions={<Badge variant="neutral">{prodSistema.length} productos</Badge>}
             >
-              Productos del sistema
+              Productos originales (con stock)
             </CardHeader>
             <CardBody className="p-0">
               {prodSistema.length === 0 ? (
@@ -248,6 +330,11 @@ export default function PreciosPage() {
                   onSave={handleSave}
                   getNombre={getNombreDisplay}
                   showSlug={false}
+                  onRename={(p) => {
+                    setRenamingTarget(p);
+                    setNewNameValue(getNombreDisplay(p));
+                  }}
+                  onDelete={setDeletingTarget}
                 />
                 
               )}
@@ -260,16 +347,10 @@ export default function PreciosPage() {
               actions={
                 <div className="flex items-center gap-2">
                   <Badge variant="info">{prodPersonalizados.length} productos</Badge>
-                  <button
-                    onClick={() => setModalOpen(true)}
-                    className="text-xs text-brand-600 hover:text-brand-800 font-medium"
-                  >
-                    + Agregar
-                  </button>
                 </div>
               }
             >
-              Productos personalizados (balanza)
+              Promociones / Combos (vínculo de stock)
             </CardHeader>
             <CardBody className="p-0">
               {prodPersonalizados.length === 0 ? (
@@ -281,7 +362,7 @@ export default function PreciosPage() {
                     Agregá los productos de tu balanza con su código PLU.
                   </p>
                   <button
-                    onClick={() => setModalOpen(true)}
+                    onClick={() => setModalType("promo")}
                     className="text-sm text-brand-600 hover:text-brand-800 font-medium"
                   >
                     Crear primer producto
@@ -300,6 +381,11 @@ export default function PreciosPage() {
                   getNombre={getNombreDisplay}
                   showSlug={true}
                   stockOptions={prodSistema}
+                  onRename={(p) => {
+                    setRenamingTarget(p);
+                    setNewNameValue(getNombreDisplay(p));
+                  }}
+                  onDelete={setDeletingTarget}
                 />
                 
               )}
@@ -310,9 +396,9 @@ export default function PreciosPage() {
 
       {/* Modal nuevo producto */}
       <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Nuevo producto personalizado"
+        open={!!modalType}
+        onClose={() => setModalType(null)}
+        title={modalType === "original" ? "Nuevo producto original" : "Nueva promo / personalizado"}
         size="sm"
       >
         <div className="space-y-4">
@@ -336,15 +422,11 @@ export default function PreciosPage() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm
                            focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
-              {(newNombre.trim() || newPlu.trim()) && (
+              {newNombre.trim() && (
                 <p className="text-xs text-gray-400 mt-1">
                   Nombre interno:&nbsp;
                   <code className="bg-gray-100 px-1 rounded">
-                    {(() => {
-                      const b = toSlug(newNombre);
-                      const p = toSlug(newPlu.trim()) || "plu";
-                      return b ? `${b}_${p}` : p;
-                    })()}
+                    {toSlug(newNombre)}
                   </code>
                 </p>
               )}
@@ -388,40 +470,44 @@ export default function PreciosPage() {
               </div>
             </div>
 
-            {/* Toggle precio fijo */}
-            <div className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-800">Precio fijo (promo)</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  El precio configurado es el total cobrado (ej: $10.500 por el combo),
-                  no se multiplica por los kilos. Solo se pide el peso real.
+            {/* Toggle precio fijo (solo para promos) */}
+            {modalType === "promo" && (
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-800">Precio fijo (promo)</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    El precio configurado es el total cobrado (ej: $10.500 por el combo),
+                    no se multiplica por los kilos. Solo se pide el peso real.
+                  </p>
+                </div>
+                <Toggle value={newPrecioFijo} onChange={setNewPrecioFijo} />
+              </div>
+            )}
+
+            {modalType === "promo" && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Descuenta stock de <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={newStockSource}
+                  onChange={(e) => setNewStockSource(e.target.value)}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-brand-500
+                    ${newStockSource ? "border-green-400" : "border-amber-300"}`}
+                >
+                  <option value="">Seleccionar producto original...</option>
+                  {prodSistema.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {getProductoLabel(s.nombre)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  Al vender este producto, el stock se descuenta del producto original seleccionado.
                 </p>
               </div>
-              <Toggle value={newPrecioFijo} onChange={setNewPrecioFijo} />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Descuenta stock de <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={newStockSource}
-                onChange={(e) => setNewStockSource(e.target.value)}
-                className={`w-full rounded-lg border px-3 py-2 text-sm
-                  focus:outline-none focus:ring-2 focus:ring-brand-500
-                  ${newStockSource ? "border-green-400" : "border-amber-300"}`}
-              >
-                <option value="">— Sin vincular —</option>
-                {prodSistema.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {SISTEMA_LABELS[s.nombre] ?? s.nombre}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-400 mt-1">
-                Al vender este producto, el stock se descuenta del producto seleccionado.
-              </p>
-            </div>
+            )}
           </div>
 
           <Button onClick={handleCreate} loading={creating} fullWidth>
@@ -429,21 +515,70 @@ export default function PreciosPage() {
           </Button>
         </div>
       </Modal>
+
+      {/* Modal renombrar producto */}
+      <Modal
+        open={!!renamingTarget}
+        onClose={() => { setRenamingTarget(null); setNewNameValue(""); }}
+        title="Renombrar producto"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Nuevo nombre del producto <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={newNameValue}
+              onChange={(e) => setNewNameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleRename(); }}
+              placeholder="ej: Suprema de Pollo..."
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            {newNameValue.trim() && (
+              <p className="text-xs text-gray-400 mt-1">
+                Nombre interno (slug):&nbsp;
+                <code className="bg-gray-100 px-1 rounded">
+                  {toSlug(newNameValue)}
+                </code>
+              </p>
+            )}
+          </div>
+
+          <Button onClick={handleRename} loading={renaming} fullWidth>
+            Guardar cambios
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Confirmación eliminar producto */}
+      <ConfirmDialog
+        open={!!deletingTarget}
+        onClose={() => setDeletingTarget(null)}
+        onConfirm={handleDeleteProducto}
+        loading={deleting}
+        title="Eliminar producto"
+        message={`¿Eliminar "${deletingTarget ? getNombreDisplay(deletingTarget) : ""}"? Si el producto posee transacciones (ventas, remitos, etc.) registradas, se desactivará lógicamente en lugar de borrarse físicamente para preservar el historial.`}
+      />
     </div>
   );
 }
 
 // ── Toggle reutilizable ──────────────────────────────────────────────────
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={value}
-      onClick={() => onChange(!value)}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!value)}
       className={`relative inline-flex shrink-0 h-6 w-11 items-center rounded-full transition-colors duration-200
         focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1
-        ${value ? "bg-purple-600" : "bg-gray-300"}`}
+        ${value ? "bg-purple-600" : "bg-gray-300"}
+        ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       <span
         className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200
@@ -464,11 +599,15 @@ interface ProductosListProps {
   getNombre:       (p: Producto) => string;
   showSlug:        boolean;
   stockOptions?:   Producto[];   // opciones para "Descuenta de"
+  onRename?:       (p: Producto) => void;
+  onDelete?:       (p: Producto) => void;
 }
 
 function ProductosList({
-  productos, edits, saving, hasChange, onEdit, onSave, getNombre, showSlug, stockOptions,
+  productos, edits, saving, hasChange, onEdit, onSave, getNombre, showSlug, stockOptions, onRename, onDelete,
 }: ProductosListProps) {
+  const { isAdmin } = useCurrentUser();
+
   return (
     <div className="divide-y divide-gray-100">
       {productos.map((prod) => {
@@ -495,15 +634,37 @@ function ProductosList({
                     {formatMoneda(parseFloat(edit.precio_venta))}
                   </span>
                 )}
-                <Button
-                  size="sm"
-                  variant={changed ? "primary" : "secondary"}
-                  loading={saving[prod.id]}
-                  disabled={!changed}
-                  onClick={() => onSave(prod)}
-                >
-                  {changed ? "Guardar" : "OK"}
-                </Button>
+                {isAdmin && (
+                  <div className="flex items-center gap-1.5">
+                    {onRename && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRename(prod)}
+                      >
+                        Renombrar
+                      </Button>
+                    )}
+                    {onDelete && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => onDelete(prod)}
+                      >
+                        Eliminar
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant={changed ? "primary" : "secondary"}
+                      loading={saving[prod.id]}
+                      disabled={!changed}
+                      onClick={() => onSave(prod)}
+                    >
+                      {changed ? "Guardar" : "OK"}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -517,8 +678,9 @@ function ProductosList({
                   value={edit.codigo_plu}
                   onChange={(e) => onEdit(prod.id, "codigo_plu", e.target.value)}
                   placeholder="—"
+                  disabled={!isAdmin}
                   className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm font-mono
-                             focus:outline-none focus:ring-2 focus:ring-brand-500 text-center"
+                             focus:outline-none focus:ring-2 focus:ring-brand-500 text-center disabled:bg-gray-100 disabled:text-gray-500"
                 />
               </div>
 
@@ -534,8 +696,9 @@ function ProductosList({
                     value={edit.precio_venta}
                     onChange={(e) => onEdit(prod.id, "precio_venta", e.target.value)}
                     placeholder="0.00"
+                    disabled={!isAdmin}
                     className="w-full rounded-lg border border-gray-300 pl-5 pr-2.5 py-1.5 text-sm font-mono
-                               focus:outline-none focus:ring-2 focus:ring-brand-500"
+                               focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-100 disabled:text-gray-500"
                   />
                 </div>
               </div>
@@ -557,6 +720,7 @@ function ProductosList({
                   <Toggle
                     value={!!edit.precio_fijo}
                     onChange={(v) => onEdit(prod.id, "precio_fijo", v)}
+                    disabled={!isAdmin}
                   />
                 </div>
 
@@ -569,12 +733,13 @@ function ProductosList({
                     <select
                       value={edit.stock_source_id}
                       onChange={(e) => onEdit(prod.id, "stock_source_id", e.target.value)}
+                      disabled={!isAdmin}
                       className={`w-full rounded-lg border px-2.5 py-1.5 text-sm
                         focus:outline-none focus:ring-2 focus:ring-brand-500
                         ${edit.stock_source_id
                           ? "border-green-400 bg-green-50 text-green-800 font-medium"
                           : "border-amber-300 bg-amber-50 text-amber-700"
-                        }`}
+                        } disabled:opacity-50 disabled:bg-gray-100`}
                     >
                       <option value="">— Sin vincular (no descuenta stock) —</option>
                       {stockOptions.map((s) => (

@@ -314,3 +314,42 @@ export interface VentaForm {
   notas?: string;
   items: VentaItemForm[];
 }
+
+export interface Proveedor {
+  id: string;
+  nombre: string;
+  cuit?: string;
+  telefono?: string;
+  direccion?: string;
+  notas?: string;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Remito {
+  id: string;
+  proveedor_id: string;
+  numero_remito: string;
+  fecha: string;
+  registrado_por: string;
+  notas?: string;
+  created_at: string;
+  updated_at: string;
+  // joins
+  proveedor?: Proveedor;
+  usuario?: Usuario;
+  items?: RemitoItem[];
+}
+
+export interface RemitoItem {
+  id: string;
+  remito_id: string;
+  producto_id: string;
+  kilos: number;
+  precio_costo?: number;
+  costo_total?: number;
+  created_at: string;
+  // joins
+  producto?: Producto;
+}

@@ -11,21 +11,10 @@ import { Table } from "@/components/ui/Table";
 import { VentaForm } from "@/components/ventas/VentaForm";
 import { getVentas, deleteVenta } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
-import { formatFechaHora, formatKilos, formatMoneda, localDateStr } from "@/lib/utils";
+import { formatFechaHora, formatKilos, formatMoneda, localDateStr, getProductoLabel } from "@/lib/utils";
 import type { Venta } from "@/types";
 
-const PRODUCTO_LABELS: Record<string, string> = {
-  filet_fresco:      "Filet fresco",
-  pata_muslo_fresca: "Pata/Muslo fresca",
-  pechuga_con_piel:  "Pechuga c/piel",
-  alitas:            "Alitas",
-  carcasa:           "Carcasa",
-  menudos:           "Menudos",
-  pollo_entero:      "Pollo entero",
-  supremas:          "Supremas",
-  pata_muslo:        "Pata/Muslo",
-  pechuga:           "Filet fresco (desposte)",
-};
+
 
 export default function VentasPage() {
   const [ventas, setVentas] = useState<Venta[]>([]);
@@ -141,7 +130,7 @@ export default function VentasPage() {
                   <div className="text-xs space-y-0.5">
                     {(v.items ?? []).slice(0, 2).map((item) => (
                       <div key={item.id}>
-                        {PRODUCTO_LABELS[item.producto?.nombre ?? ""] ?? item.producto?.nombre} —{" "}
+                        {item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—"} —{" "}
                         {item.kilos.toFixed(2)} kg
                       </div>
                     ))}
@@ -254,7 +243,7 @@ export default function VentasPage() {
                   {(ventaDetalle.items ?? []).map((item) => (
                     <tr key={item.id} className="border-t border-gray-100">
                       <td className="px-3 py-2">
-                        {PRODUCTO_LABELS[item.producto?.nombre ?? ""] ?? item.producto?.nombre}
+                        {item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right">{item.kilos.toFixed(3)}</td>
                       <td className="px-3 py-2 text-right">

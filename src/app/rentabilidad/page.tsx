@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { formatFecha, formatMoneda, rendimientoColor } from "@/lib/utils";
+import { formatFecha, formatMoneda, rendimientoColor, getProductoLabel } from "@/lib/utils";
 import { getRentabilidadLotes, getVentasPorProducto } from "@/lib/supabase/queries";
 import type { VRentabilidadLote, VVentasPorProducto } from "@/types";
 
@@ -13,19 +13,6 @@ const TIPO_LABELS: Record<string, string> = {
   filet_congelado:      "Filet congelado",
   pata_muslo_fresca:    "Pata/Muslo fresca",
   pata_muslo_congelada: "Pata/Muslo congelada",
-};
-
-const PRODUCTO_LABELS: Record<string, string> = {
-  filet_fresco:      "Filet fresco",
-  pata_muslo_fresca: "Pata/Muslo fresca",
-  pechuga_con_piel:  "Pechuga c/piel",
-  alitas:            "Alitas",
-  carcasa:           "Carcasa",
-  menudos:           "Menudos",
-  supremas:          "Supremas",
-  pollo_entero:      "Pollo entero",
-  pata_muslo:        "Pata/Muslo",
-  pechuga:           "Filet (desposte)",
 };
 
 type Periodo = "30d" | "90d" | "365d" | "todo";
@@ -253,7 +240,7 @@ export default function RentabilidadPage() {
                         <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">
-                              {PRODUCTO_LABELS[v.producto] ?? v.producto}
+                              {getProductoLabel(v.producto)}
                             </p>
                             <p className="text-xs text-gray-400">
                               {v.kilos_vendidos.toFixed(1)} kg · {v.transacciones} transacciones
@@ -455,7 +442,7 @@ export default function RentabilidadPage() {
                           return (
                             <tr key={i} className="hover:bg-gray-50">
                               <td className="px-3 py-2.5 font-semibold text-gray-900">
-                                {PRODUCTO_LABELS[v.producto] ?? v.producto}
+                                {getProductoLabel(v.producto)}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono text-xs">
                                 {v.kilos_vendidos.toFixed(1)} kg

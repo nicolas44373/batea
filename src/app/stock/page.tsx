@@ -9,28 +9,18 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { AdminOnly } from "@/components/ui/AdminOnly";
 import { useCurrentUser } from "@/context/UserContext";
-import { getMovimientos, getStock } from "@/lib/supabase/queries";
+import { getMovimientos, getStock, getProductos } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
-import { formatFechaHora, formatKilos } from "@/lib/utils";
-import type { MovimientoStock, VStockActual } from "@/types";
+import { formatFechaHora, formatKilos, getProductoLabel } from "@/lib/utils";
+import type { MovimientoStock, VStockActual, Producto } from "@/types";
 
-const PRODUCTO_LABELS: Record<string, string> = {
-  filet_fresco:      "Filet fresco",
-  pata_muslo_fresca: "Pata/Muslo fresca",
-  pechuga_con_piel:  "Pechuga c/piel",
-  alitas:            "Alitas",
-  carcasa:           "Carcasa",
-  menudos:           "Menudos",
-  pollo_entero:      "Pollo entero",
-  supremas:          "Supremas",
-};
-
-// Productos que se muestran en la batea (excluye congelados, pechuga y pata_muslo del desposte)
-const PRODUCTOS_BATEA = new Set(Object.keys(PRODUCTO_LABELS));
+// Excluir productos internos del desposte que se calculan mediante otras columnas (su stock es virtual o mapea a otro)
+const EXCLUDED_PRODUCTOS = new Set(["pechuga", "pata_muslo"]);
 
 export default function StockPage() {
   const [stock, setStock]         = useState<VStockActual[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoStock[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading]     = useState(true);
   const [filtroProducto, setFiltroProducto] = useState<string | undefined>();
   const [ajusteModal, setAjusteModal] = useState(false);
@@ -44,9 +34,14 @@ export default function StockPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, m] = await Promise.all([getStock(), getMovimientos(filtroProducto)]);
+      const [s, m, p] = await Promise.all([
+        getStock(),
+        getMovimientos(filtroProducto),
+        getProductos()
+      ]);
       setStock(s);
       setMovimientos(m);
+      setProductos(p);
     } finally {
       setLoading(false);
     }
@@ -56,7 +51,11 @@ export default function StockPage() {
     fetchData();
   }, [fetchData]);
 
-  const stockBatea = stock.filter((s) => PRODUCTOS_BATEA.has(s.producto));
+  // Excluir promos (productos que tienen una fuente de stock vinculada)
+  const promosIds = new Set(productos.filter((p) => p.stock_source_id != null).map((p) => p.id));
+  const stockBatea = stock.filter(
+    (s) => !EXCLUDED_PRODUCTOS.has(s.producto) && !promosIds.has(s.producto_id)
+  );
   const totalKilos = stockBatea.reduce((s, p) => s + p.kilos, 0);
 
   const handleAjuste = async () => {
@@ -127,7 +126,7 @@ export default function StockPage() {
             }`}
           >
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-              {PRODUCTO_LABELS[s.producto] ?? s.producto}
+              {getProductoLabel(s.producto)}
             </p>
             <p
               className={`text-2xl font-bold mt-1 ${
@@ -200,7 +199,7 @@ export default function StockPage() {
           Historial de movimientos
           {filtroProducto && (
             <span className="ml-2 text-xs text-gray-500 font-normal">
-              — {PRODUCTO_LABELS[stockBatea.find((s) => s.producto_id === filtroProducto)?.producto ?? ""] ?? ""}
+              — {getProductoLabel(stockBatea.find((s) => s.producto_id === filtroProducto)?.producto ?? "")}
             </span>
           )}
         </CardHeader>
@@ -222,7 +221,7 @@ export default function StockPage() {
                 key: "producto",
                 header: "Producto",
                 render: (m) =>
-                  PRODUCTO_LABELS[m.producto?.nombre ?? ""] ?? m.producto?.nombre ?? "—",
+                  m.producto?.nombre ? getProductoLabel(m.producto.nombre) : "—",
               },
               {
                 key: "tipo",
@@ -303,7 +302,7 @@ export default function StockPage() {
                 <option value="">Seleccionar...</option>
                 {stockBatea.map((s) => (
                   <option key={s.producto_id} value={s.producto_id}>
-                    {PRODUCTO_LABELS[s.producto] ?? s.producto} — {s.kilos.toFixed(2)} kg actuales
+                    {getProductoLabel(s.producto)} — {s.kilos.toFixed(2)} kg actuales
                   </option>
                 ))}
               </select>

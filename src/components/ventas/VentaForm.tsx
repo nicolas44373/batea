@@ -6,32 +6,10 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { getProductoPorPlu, getStock, insertVenta } from "@/lib/supabase/queries";
-import { formatKilos, formatMoneda, resolverScanBalanza } from "@/lib/utils";
+import { formatKilos, formatMoneda, resolverScanBalanza, getProductoLabel } from "@/lib/utils";
 import type { Producto, VStockActual } from "@/types";
 
-const PRODUCTO_LABELS: Record<string, string> = {
-  filet_fresco:      "Filet fresco",
-  pata_muslo_fresca: "Pata/Muslo fresca",
-  pechuga_con_piel:  "Pechuga c/piel",
-  alitas:            "Alitas",
-  carcasa:           "Carcasa",
-  menudos:           "Menudos",
-  pollo_entero:      "Pollo entero",
-  supremas:          "Supremas",
-  pata_muslo:        "Pata/Muslo",
-  pechuga:           "Filet fresco (desposte)",
-};
-
-const PRODUCTOS_BATEA_VENTA = new Set([
-  "filet_fresco",
-  "pata_muslo_fresca",
-  "pechuga_con_piel",
-  "alitas",
-  "carcasa",
-  "menudos",
-  "pollo_entero",
-  "supremas",
-]);
+const EXCLUDED_PRODUCTOS_VENTA = new Set(["pechuga", "pata_muslo"]);
 
 // Productos habilitados para el modo promo (precio fijo por unidad de venta)
 const PRODUCTOS_PROMO = new Set(["filet_fresco", "pata_muslo_fresca", "pechuga_con_piel"]);
@@ -134,7 +112,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       const stockCheckId = prod.stock_source_id ?? prod.id;
       const stockItem = stock.find((s) => s.producto_id === stockCheckId);
       if (!stockItem) {
-        const nombre = PRODUCTO_LABELS[prod.nombre] ?? prod.nombre;
+        const nombre = getProductoLabel(prod.nombre);
         setScanError(`No hay registro de stock para ${nombre}.`);
         setPluInput("");
         pluRef.current?.focus();
@@ -166,7 +144,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
           }
         });
 
-        toast.success(`${PRODUCTO_LABELS[prod.nombre] ?? prod.nombre} agregado (${formatKilos(kilos)})`);
+        toast.success(`${getProductoLabel(prod.nombre)} agregado (${formatKilos(kilos)})`);
         setPluInput("");
         resetScanPanel();
         setTimeout(() => {
@@ -220,7 +198,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
     }
 
     resetScanPanel();
-    toast.success(`${PRODUCTO_LABELS[scanResult.nombre] ?? scanResult.nombre} agregado`);
+    toast.success(`${getProductoLabel(scanResult.nombre)} agregado`);
     setTimeout(() => pluRef.current?.focus(), 100);
   };
 
@@ -365,7 +343,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     Producto detectado
                   </p>
                   <p className="text-lg font-bold text-gray-900">
-                    {PRODUCTO_LABELS[scanResult.nombre] ?? scanResult.nombre}
+                    {getProductoLabel(scanResult.nombre)}
                   </p>
                   {scanResult.codigo_plu && (
                     <p className="text-xs text-gray-500">PLU {scanResult.codigo_plu}</p>
@@ -505,7 +483,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
           <p className="text-xs font-medium text-gray-600">Seleccioná un producto:</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {stock
-              .filter((s) => PRODUCTOS_BATEA_VENTA.has(s.producto))
+              .filter((s) => !EXCLUDED_PRODUCTOS_VENTA.has(s.producto))
               .sort((a, b) => {
                 const orden = ["filet_fresco", "pata_muslo_fresca", "pechuga_con_piel"];
                 const ia = orden.indexOf(a.producto);
@@ -539,7 +517,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     }`}
                 >
                   <span className="text-sm font-semibold text-gray-900">
-                    {PRODUCTO_LABELS[s.producto] ?? s.producto}
+                    {getProductoLabel(s.producto)}
                   </span>
                   <span
                     className={`text-xs font-medium ${
@@ -568,7 +546,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className="text-sm font-medium text-gray-900 truncate">
-                      {PRODUCTO_LABELS[item.producto.nombre] ?? item.producto.nombre}
+                      {getProductoLabel(item.producto.nombre)}
                     </p>
                     {item.isPromo && (
                       <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold shrink-0">

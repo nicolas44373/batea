@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Badge } from "@/components/ui/Badge";
 import { formatMoneda } from "@/lib/utils";
+import { AdminOnly } from "@/components/ui/AdminOnly";
 import { getMarcas, insertMarca, updateMarca, deleteMarca } from "@/lib/supabase/queries";
 import type { MarcaConfiguracion } from "@/types";
 
@@ -147,7 +148,9 @@ export default function MarcasPage() {
             Se auto-completan al registrar un nuevo lote.
           </p>
         </div>
-        <Button onClick={openCreate}>+ Nueva marca</Button>
+        <AdminOnly>
+          <Button onClick={openCreate}>+ Nueva marca</Button>
+        </AdminOnly>
       </div>
 
       {loading ? (
@@ -199,14 +202,16 @@ export default function MarcasPage() {
                             )}
                           </div>
                         </div>
-                        <div className="flex gap-1 shrink-0">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(m)}>
-                            Editar
-                          </Button>
-                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(m)}>
-                            ×
-                          </Button>
-                        </div>
+                        <AdminOnly>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="sm" variant="ghost" onClick={() => openEdit(m)}>
+                              Editar
+                            </Button>
+                            <Button size="sm" variant="danger" onClick={() => setDeleteTarget(m)}>
+                              ×
+                            </Button>
+                          </div>
+                        </AdminOnly>
                       </div>
                     ))}
                   </div>

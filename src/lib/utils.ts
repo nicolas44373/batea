@@ -377,3 +377,26 @@ export const ESTADO_COLORS: Record<string, string> = {
   completada: "bg-green-100 text-green-800",
   cancelada: "bg-gray-100 text-gray-600",
 };
+
+export const SISTEMA_LABELS: Record<string, string> = {
+  filet_fresco:         "Filet fresco",
+  pata_muslo_fresca:    "Pata/Muslo fresca",
+  pechuga_con_piel:     "Pechuga c/piel",
+  alitas:               "Alitas",
+  carcasa:              "Carcasa",
+  menudos:              "Menudos",
+  pollo_entero:         "Pollo entero",
+  supremas:             "Supremas",
+  filet_congelado:      "Filet congelado",
+  pata_muslo_congelada: "Pata/Muslo congelada",
+  pata_muslo:           "Pata/Muslo (desposte)",
+  pechuga:              "Filet fresco (desposte)",
+};
+
+export function getProductoLabel(nombre: string): string {
+  if (SISTEMA_LABELS[nombre]) return SISTEMA_LABELS[nombre];
+  return nombre
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}

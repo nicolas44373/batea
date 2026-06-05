@@ -6,7 +6,7 @@ import { Card, CardBody, CardHeader, StatCard } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Table } from "@/components/ui/Table";
-import { getAlertas, getLotes, getStock, getVentas } from "@/lib/supabase/queries";
+import { getAlertas, getLotes, getStock, getVentas, getProductos } from "@/lib/supabase/queries";
 import {
   formatFecha,
   formatFechaHora,
@@ -14,6 +14,7 @@ import {
   formatMoneda,
   localDateStr,
   rendimientoColor,
+  getProductoLabel,
 } from "@/lib/utils";
 import {
   BarChart,
@@ -24,40 +25,27 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import type { LoteCajones, VAlertasProduccion, VStockActual, Venta } from "@/types";
+import type { LoteCajones, VAlertasProduccion, VStockActual, Venta, Producto } from "@/types";
 
-const PRODUCTO_LABELS: Record<string, string> = {
-  filet_fresco:      "Filet fresco",
-  pata_muslo_fresca: "Pata/Muslo fresca",
-  pechuga_con_piel:  "Pechuga c/piel",
-  alitas:            "Alitas",
-  carcasa:           "Carcasa",
-  menudos:           "Menudos",
-  pollo_entero:      "Pollo entero",
-  supremas:          "Supremas",
-  pata_muslo:        "Pata/Muslo",
-  pechuga:           "Filet fresco (desposte)",
-};
-
-const PRODUCTOS_BATEA = new Set([
-  "filet_fresco", "pata_muslo_fresca", "pechuga_con_piel",
-  "alitas", "carcasa", "menudos", "pollo_entero", "supremas",
-]);
+// Excluir productos internos del desposte que se calculan mediante otras columnas (su stock es virtual o mapea a otro)
+const EXCLUDED_PRODUCTOS = new Set(["pechuga", "pata_muslo"]);
 
 export default function DashboardPage() {
   const [stock, setStock] = useState<VStockActual[]>([]);
   const [lotes, setLotes] = useState<LoteCajones[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [alertas, setAlertas] = useState<VAlertasProduccion[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getStock(), getLotes(), getVentas(), getAlertas()])
-      .then(([s, l, v, a]) => {
+    Promise.all([getStock(), getLotes(), getVentas(), getAlertas(), getProductos()])
+      .then(([s, l, v, a, p]) => {
         setStock(s);
         setLotes(l);
         setVentas(v);
         setAlertas(a);
+        setProductos(p);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -66,12 +54,17 @@ export default function DashboardPage() {
   const ventasHoy = ventas.filter((v) => v.created_at.startsWith(hoy));
   const kilosHoy = ventasHoy.reduce((s, v) => s + (v.total_kilos ?? 0), 0);
   const montoHoy = ventasHoy.reduce((s, v) => s + (v.total_monto ?? 0), 0);
-  const stockBatea = stock.filter((s) => PRODUCTOS_BATEA.has(s.producto));
+
+  // Excluir promos (productos que tienen una fuente de stock vinculada)
+  const promosIds = new Set(productos.filter((p) => p.stock_source_id != null).map((p) => p.id));
+  const stockBatea = stock.filter(
+    (s) => !EXCLUDED_PRODUCTOS.has(s.producto) && !promosIds.has(s.producto_id)
+  );
   const totalKilosStock = stockBatea.reduce((s, p) => s + p.kilos, 0);
   const lotesDisponibles = lotes.filter((l) => l.cajones_disponibles > 0).length;
 
   const stockChartData = stockBatea.map((s) => ({
-    name: PRODUCTO_LABELS[s.producto] ?? s.producto,
+    name: getProductoLabel(s.producto),
     kilos: parseFloat(s.kilos.toFixed(2)),
     low: s.kilos < 10,
   }));
