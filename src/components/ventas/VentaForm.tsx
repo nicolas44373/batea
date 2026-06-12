@@ -5,9 +5,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
-import { getProductoPorPlu, getProductos, getStock, insertVenta } from "@/lib/supabase/queries";
-import { formatKilos, formatMoneda, resolverScanBalanza, getProductoLabel } from "@/lib/utils";
-import type { Producto, VStockActual } from "@/types";
+import { getClientes, getProductoPorPlu, getProductos, getStock, insertVenta } from "@/lib/supabase/queries";
+import { formatKilos, formatMoneda, resolverScanBalanza, getProductoLabel, MEDIO_PAGO_LABELS } from "@/lib/utils";
+import type { Cliente, MedioPago, Producto, VStockActual } from "@/types";
 
 const EXCLUDED_PRODUCTOS_VENTA = new Set(["pechuga", "pata_muslo"]);
 
@@ -31,8 +31,11 @@ interface VentaFormProps {
 export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
   const [stock, setStock]         = useState<VStockActual[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [clientes, setClientes]   = useState<Cliente[]>([]);
   const [cart, setCart]           = useState<CartItem[]>([]);
   const [cliente, setCliente]     = useState("");
+  const [clienteId, setClienteId] = useState("");
+  const [medioPago, setMedioPago] = useState<MedioPago>("efectivo");
   const [notas, setNotas]         = useState("");
   const [loading, setLoading]     = useState(false);
   const [scannerMode, setScannerMode] = useState(true);
@@ -55,6 +58,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
   useEffect(() => {
     getStock().then(setStock);
     getProductos().then(setProductos).catch(() => {});
+    getClientes().then(setClientes).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -237,10 +241,23 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) { toast.error("Agregá al menos un producto"); return; }
+    if (medioPago === "cuenta_corriente" && !clienteId) {
+      toast.error("Para vender a cuenta corriente tenés que elegir un cliente registrado");
+      return;
+    }
     setLoading(true);
     try {
+      const clienteNombre = clienteId
+        ? clientes.find((c) => c.id === clienteId)?.nombre ?? cliente
+        : cliente;
       await insertVenta(
-        { cliente: cliente || undefined, notas: notas || undefined, usuario_id: usuarioId },
+        {
+          cliente: clienteNombre || undefined,
+          cliente_id: clienteId || undefined,
+          medio_pago: medioPago,
+          notas: notas || undefined,
+          usuario_id: usuarioId,
+        },
         cart.map((i) => ({
           // Si el producto tiene fuente de stock, usar ese id para que el trigger descuente correctamente
           producto_id: i.stockProductoId ?? i.producto.id,
@@ -251,6 +268,8 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
       toast.success("Venta registrada");
       setCart([]);
       setCliente("");
+      setClienteId("");
+      setMedioPago("efectivo");
       setNotas("");
       onSuccess?.();
     } catch (err: unknown) {
@@ -634,12 +653,59 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
         </Alert>
       )}
 
-      <Input
-        label="Cliente (opcional)"
-        placeholder="Nombre del cliente"
-        value={cliente}
-        onChange={(e) => setCliente(e.target.value)}
-      />
+      {/* ── Medio de pago ───────────────────────────────────────────── */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-1.5">Medio de pago</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {(["efectivo", "transferencia", "tarjeta", "cuenta_corriente"] as MedioPago[]).map((mp) => (
+            <button
+              key={mp}
+              type="button"
+              onClick={() => setMedioPago(mp)}
+              className={`py-2 px-2 rounded-lg text-xs sm:text-sm font-medium border transition-all ${
+                medioPago === mp
+                  ? mp === "cuenta_corriente"
+                    ? "border-amber-500 bg-amber-50 text-amber-700"
+                    : "border-brand-500 bg-brand-50 text-brand-700"
+                  : "border-gray-200 text-gray-500 hover:border-gray-300"
+              }`}
+            >
+              {MEDIO_PAGO_LABELS[mp]}
+            </button>
+          ))}
+        </div>
+        {medioPago === "cuenta_corriente" && (
+          <p className="text-xs text-amber-700 mt-1">
+            La venta queda anotada como deuda del cliente. Registrá los pagos desde la sección Clientes.
+          </p>
+        )}
+      </div>
+
+      {/* ── Cliente ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cliente registrado {medioPago === "cuenta_corriente" && <span className="text-red-500">*</span>}
+          </label>
+          <select
+            value={clienteId}
+            onChange={(e) => setClienteId(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">Mostrador / sin registrar</option>
+            {clientes.map((c) => (
+              <option key={c.id} value={c.id}>{c.nombre}</option>
+            ))}
+          </select>
+        </div>
+        <Input
+          label="Nombre eventual (opcional)"
+          placeholder="Cliente de mostrador"
+          value={cliente}
+          onChange={(e) => setCliente(e.target.value)}
+          disabled={!!clienteId}
+        />
+      </div>
 
       <Button
         type="submit"

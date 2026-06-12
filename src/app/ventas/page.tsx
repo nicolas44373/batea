@@ -9,10 +9,74 @@ import { AdminOnly } from "@/components/ui/AdminOnly";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table } from "@/components/ui/Table";
 import { VentaForm } from "@/components/ventas/VentaForm";
+import { Badge } from "@/components/ui/Badge";
 import { getVentas, deleteVenta, updateVentaConPrecios } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
-import { formatFechaHora, formatKilos, formatMoneda, localDateStr, getProductoLabel } from "@/lib/utils";
+import { formatFechaHora, formatKilos, formatMoneda, localDateStr, getProductoLabel, MEDIO_PAGO_LABELS } from "@/lib/utils";
 import type { Venta } from "@/types";
+
+const MEDIO_BADGE: Record<string, "success" | "info" | "neutral" | "warning"> = {
+  efectivo:         "success",
+  transferencia:    "info",
+  tarjeta:          "neutral",
+  cuenta_corriente: "warning",
+};
+
+/** Ticket de venta imprimible (formato angosto tipo 80mm) */
+function imprimirTicket(v: Venta) {
+  const win = window.open("", "_blank", "width=420,height=640");
+  if (!win) return;
+  const filas = (v.items ?? [])
+    .map((item) => {
+      const nombre = item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—";
+      const sub = item.subtotal ?? item.kilos * (item.precio_kg ?? 0);
+      return `<tr>
+        <td>${nombre}</td>
+        <td class="r">${item.kilos.toFixed(3)}</td>
+        <td class="r">${item.precio_kg ? formatMoneda(item.precio_kg) : "—"}</td>
+        <td class="r">${sub ? formatMoneda(sub) : "—"}</td>
+      </tr>`;
+    })
+    .join("");
+  win.document.write(`
+    <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+    <title>Ticket venta #${v.numero}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Courier New', monospace; font-size: 12px; color: #000; padding: 12px; max-width: 320px; }
+      h1 { font-size: 16px; text-align: center; }
+      .sub { text-align: center; font-size: 11px; margin-bottom: 8px; }
+      hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-size: 10px; border-bottom: 1px solid #000; padding: 2px 0; }
+      td { padding: 2px 0; font-size: 11px; vertical-align: top; }
+      .r { text-align: right; }
+      .tot { font-size: 14px; font-weight: bold; }
+      .foot { text-align: center; font-size: 10px; margin-top: 10px; }
+    </style></head><body>
+      <h1>BATEA</h1>
+      <p class="sub">Ticket de venta #${v.numero}</p>
+      <hr/>
+      <p>Fecha: ${formatFechaHora(v.created_at)}</p>
+      <p>Cliente: ${v.cliente_registrado?.nombre ?? v.cliente ?? "Mostrador"}</p>
+      <p>Pago: ${MEDIO_PAGO_LABELS[v.medio_pago ?? "efectivo"] ?? v.medio_pago ?? "Efectivo"}</p>
+      <p>Cajero: ${v.usuario?.nombre ?? "—"}</p>
+      <hr/>
+      <table>
+        <thead><tr><th>Producto</th><th class="r">Kg</th><th class="r">$/kg</th><th class="r">Subt.</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+      <hr/>
+      <p class="r">Kilos: ${(v.total_kilos ?? 0).toFixed(3)} kg</p>
+      <p class="r tot">TOTAL: ${v.total_monto ? formatMoneda(v.total_monto) : "—"}</p>
+      <hr/>
+      <p class="foot">¡Gracias por su compra!</p>
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); win.close(); }, 400);
+}
 
 
 
@@ -161,7 +225,19 @@ export default function VentasPage() {
               {
                 key: "cliente",
                 header: "Cliente",
-                render: (v) => v.cliente ?? <span className="text-gray-400">Mostrador</span>,
+                render: (v) =>
+                  v.cliente_registrado?.nombre ?? v.cliente ?? (
+                    <span className="text-gray-400">Mostrador</span>
+                  ),
+              },
+              {
+                key: "medio_pago",
+                header: "Pago",
+                render: (v) => (
+                  <Badge variant={MEDIO_BADGE[v.medio_pago ?? "efectivo"] ?? "neutral"}>
+                    {MEDIO_PAGO_LABELS[v.medio_pago ?? "efectivo"] ?? v.medio_pago}
+                  </Badge>
+                ),
               },
               {
                 key: "items",
@@ -341,11 +417,19 @@ export default function VentasPage() {
               </div>
               <div>
                 <p className="text-xs text-gray-500">Cliente</p>
-                <p className="font-medium">{ventaDetalle.cliente ?? "Mostrador"}</p>
+                <p className="font-medium">
+                  {ventaDetalle.cliente_registrado?.nombre ?? ventaDetalle.cliente ?? "Mostrador"}
+                </p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Cajero</p>
                 <p className="font-medium">{ventaDetalle.usuario?.nombre ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Medio de pago</p>
+                <Badge variant={MEDIO_BADGE[ventaDetalle.medio_pago ?? "efectivo"] ?? "neutral"}>
+                  {MEDIO_PAGO_LABELS[ventaDetalle.medio_pago ?? "efectivo"] ?? ventaDetalle.medio_pago}
+                </Badge>
               </div>
             </div>
 
@@ -388,6 +472,17 @@ export default function VentasPage() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setVentaDetalle(null)}>Cerrar</Button>
+              <Button onClick={() => imprimirTicket(ventaDetalle)}>
+                <svg className="w-4 h-4 mr-1.5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Imprimir ticket
+              </Button>
             </div>
           </div>
         )}

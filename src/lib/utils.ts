@@ -357,6 +357,41 @@ export const TIPO_CAJON_LABELS: Record<string, string> = {
   pata_muslo_congelada: "Pata/Muslo congelada",
 };
 
+export const MEDIO_PAGO_LABELS: Record<string, string> = {
+  efectivo:         "Efectivo",
+  transferencia:    "Transferencia",
+  tarjeta:          "Tarjeta",
+  cuenta_corriente: "Cta. Corriente",
+};
+
+/**
+ * Descarga un CSV (separador ';' y BOM UTF-8 para que Excel es-AR lo abra bien).
+ * rows: array de objetos; headers define orden y etiqueta de columnas.
+ */
+export function descargarCsv(
+  filename: string,
+  headers: { key: string; label: string }[],
+  rows: Record<string, string | number | null | undefined>[]
+): void {
+  const esc = (v: string | number | null | undefined) => {
+    const s = v == null ? "" : String(v);
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    headers.map((h) => esc(h.label)).join(";"),
+    ...rows.map((r) => headers.map((h) => esc(r[h.key])).join(";")),
+  ];
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export const ROLES_LABELS: Record<string, string> = {
   admin: "Administrador",
   encargado: "Encargado",

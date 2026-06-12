@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { formatFecha, formatMoneda, rendimientoColor, getProductoLabel } from "@/lib/utils";
-import { getRentabilidadLotes, getVentasPorProducto } from "@/lib/supabase/queries";
-import type { VRentabilidadLote, VVentasPorProducto } from "@/types";
+import { getRentabilidadLotes, getVentasPorProducto, getProductos } from "@/lib/supabase/queries";
+import type { Producto, VRentabilidadLote, VVentasPorProducto } from "@/types";
 
 const TIPO_LABELS: Record<string, string> = {
   pollo_entero:         "Pollo entero",
@@ -29,6 +29,7 @@ function fechaDesde(periodo: Periodo): string | null {
 export default function RentabilidadPage() {
   const [lotes, setLotes]         = useState<VRentabilidadLote[]>([]);
   const [ventas, setVentas]       = useState<VVentasPorProducto[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading]     = useState(true);
   const [periodo, setPeriodo]     = useState<Periodo>("30d");
   const [tabActivo, setTabActivo] = useState<"resumen" | "lotes" | "marcas" | "ventas">("resumen");
@@ -36,12 +37,14 @@ export default function RentabilidadPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [l, v] = await Promise.all([
+      const [l, v, p] = await Promise.all([
         getRentabilidadLotes(),
         getVentasPorProducto(),
+        getProductos(),
       ]);
       setLotes(l);
       setVentas(v);
+      setProductos(p);
     } finally {
       setLoading(false);
     }
@@ -424,13 +427,14 @@ export default function RentabilidadPage() {
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Kg vendidos</th>
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Ingreso total</th>
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">$/kg promedio</th>
+                        <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Precio lista</th>
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Margen est.</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {ventasFiltradas.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
+                          <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
                             Sin ventas con precio registrado
                           </td>
                         </tr>
@@ -439,6 +443,8 @@ export default function RentabilidadPage() {
                           const margen = costoPorKgProm > 0 && v.precio_kg_promedio > 0
                             ? ((v.precio_kg_promedio - costoPorKgProm) / v.precio_kg_promedio) * 100
                             : null;
+                          const precioLista = productos.find((p) => p.nombre === v.producto)?.precio_venta ?? null;
+                          const vendeBajoLista = precioLista != null && precioLista > 0 && v.precio_kg_promedio < precioLista * 0.97;
                           return (
                             <tr key={i} className="hover:bg-gray-50">
                               <td className="px-3 py-2.5 font-semibold text-gray-900">
@@ -451,7 +457,15 @@ export default function RentabilidadPage() {
                                 {formatMoneda(v.ingreso_total)}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono">
-                                {formatMoneda(v.precio_kg_promedio)}
+                                <span className={vendeBajoLista ? "text-amber-600 font-semibold" : ""}>
+                                  {formatMoneda(v.precio_kg_promedio)}
+                                </span>
+                                {vendeBajoLista && (
+                                  <span className="block text-[10px] text-amber-500">debajo de lista</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-xs text-gray-500">
+                                {precioLista != null && precioLista > 0 ? formatMoneda(precioLista) : "—"}
                               </td>
                               <td className="px-3 py-2.5 text-right">
                                 {margen != null ? (
@@ -477,11 +491,16 @@ export default function RentabilidadPage() {
                           <td className="px-3 py-2.5 text-right font-bold text-green-700">
                             {formatMoneda(totalIngresos)}
                           </td>
-                          <td colSpan={2} />
+                          <td colSpan={3} />
                         </tr>
                       </tfoot>
                     )}
                   </table>
+                  <p className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
+                    El margen estimado compara el precio promedio de venta contra el costo por kg
+                    producido del desposte ({costoPorKgProm > 0 ? formatMoneda(costoPorKgProm) : "sin datos"}/kg,
+                    promedio del período). Cargá el costo por cajón en cada lote para que sea preciso.
+                  </p>
                 </CardBody>
               </Card>
 

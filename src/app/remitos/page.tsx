@@ -13,7 +13,7 @@ import {
   getRemitos,
   insertRemito,
   updateRemito,
-  updateRemitoItem,
+  updateRemitoItemConStock,
   deleteRemito,
 } from "@/lib/supabase/queries";
 import { formatFechaHora, getProductoLabel } from "@/lib/utils";
@@ -50,7 +50,7 @@ export default function RemitosPage() {
   // Edición / eliminación (admin)
   const [editTarget, setEditTarget]     = useState<Remito | null>(null);
   const [editCabecera, setEditCabecera] = useState({ proveedor_id: "", numero_remito: "", notas: "" });
-  const [editItems, setEditItems]       = useState<{ id: string; producto_nombre: string; kilos: string; precio_costo: string }[]>([]);
+  const [editItems, setEditItems]       = useState<{ id: string; producto_id: string; producto_nombre: string; kilos: string; kilos_anterior: number; precio_costo: string }[]>([]);
   const [editSaving, setEditSaving]     = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Remito | null>(null);
   const [deleting, setDeleting]         = useState(false);
@@ -193,8 +193,10 @@ export default function RemitosPage() {
     setEditItems(
       (r.items ?? []).map((item) => ({
         id: item.id,
+        producto_id: item.producto_id,
         producto_nombre: item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—",
         kilos: item.kilos.toString(),
+        kilos_anterior: item.kilos,
         precio_costo: item.precio_costo?.toString() ?? "",
       }))
     );
@@ -218,13 +220,19 @@ export default function RemitosPage() {
         const kilos = parseFloat(item.kilos);
         if (!kilos || kilos <= 0) continue;
         const precio = item.precio_costo ? parseFloat(item.precio_costo) : null;
-        await updateRemitoItem(item.id, {
-          kilos,
-          precio_costo: precio,
-          costo_total: precio ? kilos * precio : null,
-        });
+        await updateRemitoItemConStock(
+          item.id,
+          item.producto_id,
+          item.kilos_anterior,
+          {
+            kilos,
+            precio_costo: precio,
+            costo_total: precio ? kilos * precio : null,
+          },
+          userId
+        );
       }
-      toast.success("Remito actualizado");
+      toast.success("Remito actualizado y stock conciliado");
       setEditTarget(null);
       fetchData();
     } catch (err: unknown) {
@@ -622,8 +630,9 @@ export default function RemitosPage() {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-amber-600 mt-1">
-              Modificar unidades no recalcula el stock automáticamente. Si cambiás cantidades, ajustá el stock desde la sección Stock.
+            <p className="text-xs text-gray-400 mt-1">
+              Al guardar, el stock se ajusta automáticamente por la diferencia de unidades y queda
+              registrado en el historial de movimientos.
             </p>
           </div>
 

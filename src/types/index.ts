@@ -1,5 +1,6 @@
 export type UserRole = "admin" | "encargado" | "operario" | "cajero";
 export type MovimientoTipo = "ingreso" | "egreso" | "ajuste";
+export type MedioPago = "efectivo" | "transferencia" | "tarjeta" | "cuenta_corriente";
 export type OrdenEstado = "pendiente" | "en_proceso" | "completada" | "cancelada";
 export type TipoCajon =
   | "pollo_entero"
@@ -201,6 +202,8 @@ export interface Venta {
   id: string;
   numero: number;
   cliente?: string;
+  cliente_id?: string;        // cliente registrado (cuenta corriente)
+  medio_pago?: MedioPago;
   total_kilos?: number;
   total_monto?: number;
   notas?: string;
@@ -209,6 +212,7 @@ export interface Venta {
   // joins
   usuario?: Usuario;
   items?: VentaItem[];
+  cliente_registrado?: Cliente;
 }
 
 export interface VentaItem {
@@ -325,6 +329,57 @@ export interface Proveedor {
   activo: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface Cliente {
+  id: string;
+  nombre: string;
+  telefono?: string;
+  direccion?: string;
+  cuit?: string;
+  notas?: string;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PagoCliente {
+  id: string;
+  cliente_id: string;
+  monto: number;
+  medio_pago: MedioPago;
+  notas?: string;
+  usuario_id?: string;
+  created_at: string;
+  // joins
+  cliente?: Cliente;
+  usuario?: Usuario;
+}
+
+/** Saldo de cuenta corriente calculado en el cliente */
+export interface SaldoCliente {
+  cliente: Cliente;
+  total_fiado: number;     // ventas con medio cuenta_corriente
+  total_pagado: number;    // pagos registrados
+  saldo: number;           // fiado - pagado (positivo = debe)
+}
+
+export interface CierreCaja {
+  id: string;
+  fecha: string;
+  total_ventas: number;
+  total_efectivo: number;
+  total_transferencia: number;
+  total_tarjeta: number;
+  total_cuenta_corriente: number;
+  total_pagos_recibidos: number;
+  efectivo_contado?: number;
+  diferencia?: number;
+  notas?: string;
+  usuario_id?: string;
+  created_at: string;
+  // joins
+  usuario?: Usuario;
 }
 
 export interface Remito {

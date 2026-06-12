@@ -18,7 +18,20 @@ import type {
   VVentasPorProducto,
   Proveedor,
   Remito,
+  Cliente,
+  PagoCliente,
+  SaldoCliente,
+  CierreCaja,
+  MedioPago,
 } from "@/types";
+
+/** Error por columna/tabla inexistente (migración V2 sin ejecutar) */
+function isMissingSchemaError(err: { code?: string; message?: string | null } | null): boolean {
+  if (!err) return false;
+  if (err.code === "PGRST204" || err.code === "42P01" || err.code === "42703") return true;
+  const m = (err.message ?? "").toLowerCase();
+  return m.includes("does not exist") || m.includes("could not find");
+}
 
 /** Fila DB puede usar `pollo_entero` o la columna legacy `otros`. */
 function normalizeProduccionRow(row: Record<string, unknown>): Produccion {
@@ -301,20 +314,33 @@ export async function getMovimientos(
 // ── VENTAS ─────────────────────────────────────────────────────────────
 export async function getVentas(): Promise<Venta[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("ventas")
     .select(`
       *,
       usuario:usuarios(id,nombre),
+      cliente_registrado:clientes(id,nombre),
       items:venta_items(*, producto:productos(id,nombre))
     `)
     .order("created_at", { ascending: false });
+
+  // Fallback si aún no se ejecutó la migración V2 (sin tabla clientes)
+  if (error && isMissingSchemaError(error)) {
+    ({ data, error } = await supabase
+      .from("ventas")
+      .select(`
+        *,
+        usuario:usuarios(id,nombre),
+        items:venta_items(*, producto:productos(id,nombre))
+      `)
+      .order("created_at", { ascending: false }));
+  }
   if (error) throw error;
-  return data;
+  return data ?? [];
 }
 
 export async function insertVenta(
-  ventaPayload: { cliente?: string; notas?: string; usuario_id: string },
+  ventaPayload: { cliente?: string; notas?: string; usuario_id: string; medio_pago?: MedioPago; cliente_id?: string },
   items: { producto_id: string; kilos: number; precio_kg?: number }[]
 ): Promise<Venta> {
   const supabase = createClient();
@@ -322,12 +348,23 @@ export async function insertVenta(
   const totalKilos = items.reduce((s, i) => s + i.kilos, 0);
   const totalMonto = items.reduce((s, i) => s + (i.kilos * (i.precio_kg ?? 0)), 0);
 
-  const { data: venta, error: eVenta } = await supabase
+  let { data: venta, error: eVenta } = await supabase
     .from("ventas")
     .insert({ ...ventaPayload, total_kilos: totalKilos, total_monto: totalMonto })
     .select()
     .single();
+
+  // Fallback si aún no existe medio_pago / cliente_id en la tabla (migración V2 sin ejecutar)
+  if (eVenta && isMissingSchemaError(eVenta)) {
+    const { medio_pago: _mp, cliente_id: _ci, ...legacy } = ventaPayload;
+    ({ data: venta, error: eVenta } = await supabase
+      .from("ventas")
+      .insert({ ...legacy, total_kilos: totalKilos, total_monto: totalMonto })
+      .select()
+      .single());
+  }
   if (eVenta) throw eVenta;
+  if (!venta) throw new Error("No se pudo crear la venta");
 
   const itemsPayload = items.map((i) => ({ ...i, venta_id: venta.id }));
   const { error: eItems } = await supabase.from("venta_items").insert(itemsPayload);
@@ -999,5 +1036,312 @@ export async function deleteRemito(id: string): Promise<void> {
   if (eItems) throw eItems;
   const { error } = await supabase.from("remitos").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ── CLIENTES / CUENTA CORRIENTE ─────────────────────────────────────────
+export async function getClientes(): Promise<Cliente[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("clientes")
+    .select("*")
+    .eq("activo", true)
+    .order("nombre");
+  if (error) {
+    if (isMissingSchemaError(error)) return []; // migración V2 sin ejecutar
+    throw error;
+  }
+  return data ?? [];
+}
+
+export async function getClientesAll(): Promise<Cliente[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("clientes")
+    .select("*")
+    .order("nombre");
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function insertCliente(
+  payload: Omit<Cliente, "id" | "activo" | "created_at" | "updated_at">
+): Promise<Cliente> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("clientes")
+    .insert({ ...payload, activo: true })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateCliente(
+  id: string,
+  payload: Partial<Omit<Cliente, "id" | "created_at" | "updated_at">>
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("clientes")
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteCliente(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("clientes").delete().eq("id", id);
+  if (error) {
+    // Con ventas o pagos asociados: soft delete para preservar historial
+    if (error.code === "23503") {
+      const { error: errUpdate } = await supabase
+        .from("clientes")
+        .update({ activo: false, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (errUpdate) throw errUpdate;
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function getPagosClientes(clienteId?: string): Promise<PagoCliente[]> {
+  const supabase = createClient();
+  let query = supabase
+    .from("pagos_clientes")
+    .select("*, cliente:clientes(id,nombre), usuario:usuarios(id,nombre)")
+    .order("created_at", { ascending: false });
+  if (clienteId) query = query.eq("cliente_id", clienteId);
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingSchemaError(error)) return [];
+    throw error;
+  }
+  return data ?? [];
+}
+
+export async function insertPagoCliente(
+  payload: Omit<PagoCliente, "id" | "created_at" | "cliente" | "usuario">
+): Promise<PagoCliente> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("pagos_clientes")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Saldos de cuenta corriente: ventas fiadas - pagos, calculado en el cliente */
+export async function getSaldosClientes(): Promise<SaldoCliente[]> {
+  const supabase = createClient();
+
+  const { data: clientes, error: eCli } = await supabase
+    .from("clientes")
+    .select("*")
+    .order("nombre");
+  if (eCli) {
+    if (isMissingSchemaError(eCli)) return [];
+    throw eCli;
+  }
+
+  const [{ data: ventas, error: eV }, { data: pagos, error: eP }] = await Promise.all([
+    supabase
+      .from("ventas")
+      .select("cliente_id, total_monto")
+      .eq("medio_pago", "cuenta_corriente")
+      .not("cliente_id", "is", null),
+    supabase.from("pagos_clientes").select("cliente_id, monto"),
+  ]);
+  if (eV && !isMissingSchemaError(eV)) throw eV;
+  if (eP && !isMissingSchemaError(eP)) throw eP;
+
+  const fiadoPor = new Map<string, number>();
+  for (const v of ventas ?? []) {
+    fiadoPor.set(v.cliente_id, (fiadoPor.get(v.cliente_id) ?? 0) + (v.total_monto ?? 0));
+  }
+  const pagadoPor = new Map<string, number>();
+  for (const p of pagos ?? []) {
+    pagadoPor.set(p.cliente_id, (pagadoPor.get(p.cliente_id) ?? 0) + (p.monto ?? 0));
+  }
+
+  return (clientes ?? []).map((c) => {
+    const total_fiado = fiadoPor.get(c.id) ?? 0;
+    const total_pagado = pagadoPor.get(c.id) ?? 0;
+    return { cliente: c, total_fiado, total_pagado, saldo: total_fiado - total_pagado };
+  });
+}
+
+/** Ventas a cuenta corriente de un cliente (para el detalle de cuenta) */
+export async function getVentasDeCliente(clienteId: string): Promise<Venta[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("ventas")
+    .select("*, items:venta_items(*, producto:productos(id,nombre))")
+    .eq("cliente_id", clienteId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingSchemaError(error)) return [];
+    throw error;
+  }
+  return data ?? [];
+}
+
+// ── CIERRES DE CAJA ─────────────────────────────────────────────────────
+export async function getCierresCaja(limit = 30): Promise<CierreCaja[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("cierres_caja")
+    .select("*, usuario:usuarios(id,nombre)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    if (isMissingSchemaError(error)) return [];
+    throw error;
+  }
+  return data ?? [];
+}
+
+export async function insertCierreCaja(
+  payload: Omit<CierreCaja, "id" | "created_at" | "usuario">
+): Promise<CierreCaja> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("cierres_caja")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ── CONCILIACIÓN AUTOMÁTICA DE STOCK ────────────────────────────────────
+/** Suma (delta > 0) o resta (delta < 0) kilos al stock de un producto y registra el movimiento. */
+async function aplicarDeltaStock(
+  supabase: SupabaseClient,
+  productoId: string,
+  delta: number,
+  referenciaTipo: string,
+  referenciaId: string,
+  notas: string,
+  usuarioId: string
+): Promise<void> {
+  if (!delta || !Number.isFinite(delta)) return;
+
+  const { data: stockPrev, error: eStock } = await supabase
+    .from("stock_productos")
+    .select("kilos")
+    .eq("producto_id", productoId)
+    .maybeSingle();
+  if (eStock) throw eStock;
+
+  const kilosAnterior = Number(stockPrev?.kilos ?? 0);
+  const kilosNuevo = kilosAnterior + delta;
+
+  const { error: eUpsert } = await supabase.from("stock_productos").upsert(
+    { producto_id: productoId, kilos: kilosNuevo, updated_at: new Date().toISOString() },
+    { onConflict: "producto_id" }
+  );
+  if (eUpsert) throw eUpsert;
+
+  const { error: eMov } = await supabase.from("movimientos_stock").insert({
+    producto_id: productoId,
+    tipo: delta > 0 ? "ingreso" : "egreso",
+    kilos: Math.abs(delta),
+    kilos_anterior: kilosAnterior,
+    kilos_nuevo: kilosNuevo,
+    referencia_tipo: referenciaTipo,
+    referencia_id: referenciaId,
+    notas,
+    usuario_id: usuarioId,
+  });
+  if (eMov) throw eMov;
+}
+
+const CORTES_PRODUCCION = [
+  "pata_muslo",
+  "pechuga",
+  "pechuga_con_piel",
+  "alitas",
+  "carcasa",
+  "menudos",
+  "pollo_entero",
+] as const;
+
+/**
+ * Edita los cortes de una producción y ajusta el stock por la diferencia.
+ * El trigger de inserción mapea cortes por nombre de columna = nombre de producto,
+ * así que la conciliación usa el mismo criterio.
+ */
+export async function updateProduccionConStock(
+  id: string,
+  nuevos: Record<(typeof CORTES_PRODUCCION)[number], number>,
+  usuarioId: string
+): Promise<void> {
+  const supabase = createClient();
+
+  // 1. Leer valores actuales
+  const { data: actualRaw, error: eGet } = await supabase
+    .from("produccion")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (eGet) throw eGet;
+  const actual = normalizeProduccionRow(actualRaw as Record<string, unknown>);
+
+  // 2. Actualizar la fila (con fallback legacy para pollo_entero)
+  await updateProduccion(id, nuevos);
+
+  // 3. Aplicar deltas al stock, corte por corte
+  for (const corte of CORTES_PRODUCCION) {
+    const anterior = Number(actual[corte] ?? 0);
+    const nuevo = Number(nuevos[corte] ?? 0);
+    const delta = Math.round((nuevo - anterior) * 1000) / 1000;
+    if (delta === 0) continue;
+
+    const { data: producto, error: eProd } = await supabase
+      .from("productos")
+      .select("id")
+      .eq("nombre", corte)
+      .maybeSingle();
+    if (eProd) throw eProd;
+    if (!producto?.id) continue; // sin producto para este corte: nada que conciliar
+
+    await aplicarDeltaStock(
+      supabase,
+      producto.id,
+      delta,
+      "edicion_produccion",
+      id,
+      `Corrección de producción — ${corte}: ${anterior} → ${nuevo} kg`,
+      usuarioId
+    );
+  }
+}
+
+/** Edita un ítem de remito y ajusta el stock por la diferencia de unidades. */
+export async function updateRemitoItemConStock(
+  itemId: string,
+  productoId: string,
+  kilosAnterior: number,
+  payload: { kilos: number; precio_costo?: number | null; costo_total?: number | null },
+  usuarioId: string
+): Promise<void> {
+  const supabase = createClient();
+  await updateRemitoItem(itemId, payload);
+
+  const delta = Math.round((payload.kilos - kilosAnterior) * 1000) / 1000;
+  if (delta !== 0) {
+    await aplicarDeltaStock(
+      supabase,
+      productoId,
+      delta,
+      "edicion_remito",
+      itemId,
+      `Corrección de remito: ${kilosAnterior} → ${payload.kilos}`,
+      usuarioId
+    );
+  }
 }
 

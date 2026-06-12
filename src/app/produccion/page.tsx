@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table } from "@/components/ui/Table";
 import { Alert } from "@/components/ui/Alert";
 import { RegistroProduccionForm } from "@/components/produccion/RegistroProduccionForm";
-import { getOrdenes, getOrden, getProduccion, deleteProduccion, updateProduccion } from "@/lib/supabase/queries";
+import { getOrdenes, getOrden, getProduccion, deleteProduccion, updateProduccionConStock } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
 import { formatFechaHora, formatKilos, rendimientoColor, CORTES } from "@/lib/utils";
 import type { Produccion, OrdenDesposte } from "@/types";
@@ -49,7 +49,7 @@ function ProduccionContent() {
     if (!editTarget) return;
     setEditSaving(true);
     try {
-      await updateProduccion(editTarget.id, {
+      await updateProduccionConStock(editTarget.id, {
         pata_muslo:       parseFloat(editCortes.pata_muslo) || 0,
         pechuga:          parseFloat(editCortes.pechuga) || 0,
         pechuga_con_piel: parseFloat(editCortes.pechuga_con_piel) || 0,
@@ -57,8 +57,8 @@ function ProduccionContent() {
         carcasa:          parseFloat(editCortes.carcasa) || 0,
         menudos:          parseFloat(editCortes.menudos) || 0,
         pollo_entero:     parseFloat(editCortes.pollo_entero) || 0,
-      });
-      toast.success("Producción actualizada");
+      }, userId);
+      toast.success("Producción actualizada y stock conciliado");
       setEditTarget(null);
       fetchData();
     } catch (e: unknown) {
@@ -298,9 +298,9 @@ function ProduccionContent() {
         size="md"
       >
         <div className="space-y-4">
-          <Alert variant="warning">
-            Corregir kilos acá no recalcula el stock automáticamente. Si la diferencia es importante,
-            ajustá el stock del producto desde la sección Stock (Ajuste manual).
+          <Alert variant="info">
+            Al guardar, el stock de cada corte se ajusta automáticamente por la diferencia y queda
+            registrado en el historial de movimientos como «edición de producción».
           </Alert>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {CORTES.map((c) => (
