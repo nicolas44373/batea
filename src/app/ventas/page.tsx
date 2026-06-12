@@ -9,7 +9,7 @@ import { AdminOnly } from "@/components/ui/AdminOnly";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table } from "@/components/ui/Table";
 import { VentaForm } from "@/components/ventas/VentaForm";
-import { getVentas, deleteVenta } from "@/lib/supabase/queries";
+import { getVentas, deleteVenta, updateVentaConPrecios } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
 import { formatFechaHora, formatKilos, formatMoneda, localDateStr, getProductoLabel } from "@/lib/utils";
 import type { Venta } from "@/types";
@@ -24,6 +24,46 @@ export default function VentasPage() {
   const [deleteTarget, setDeleteTarget] = useState<Venta | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [userId, setUserId] = useState("");
+
+  // Edición admin
+  const [editTarget, setEditTarget] = useState<Venta | null>(null);
+  const [editCliente, setEditCliente] = useState("");
+  const [editNotas, setEditNotas] = useState("");
+  const [editItems, setEditItems] = useState<{ id: string; nombre: string; kilos: number; precio_kg: string }[]>([]);
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEdit(v: Venta) {
+    setEditCliente(v.cliente ?? "");
+    setEditNotas(v.notas ?? "");
+    setEditItems(
+      (v.items ?? []).map((item) => ({
+        id: item.id,
+        nombre: item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—",
+        kilos: item.kilos,
+        precio_kg: item.precio_kg?.toString() ?? "",
+      }))
+    );
+    setEditTarget(v);
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget) return;
+    setEditSaving(true);
+    try {
+      await updateVentaConPrecios(
+        editTarget.id,
+        { cliente: editCliente.trim() || null, notas: editNotas.trim() || null },
+        editItems.map((i) => ({ id: i.id, kilos: i.kilos, precio_kg: parseFloat(i.precio_kg) || 0 }))
+      );
+      toast.success(`Venta #${editTarget.numero} actualizada`);
+      setEditTarget(null);
+      fetchVentas();
+    } catch (e: unknown) {
+      toast.error((e as Error).message ?? "Error al actualizar");
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function handleDeleteVenta() {
     if (!deleteTarget) return;
@@ -167,12 +207,20 @@ export default function VentasPage() {
                 header: "",
                 render: (v) => (
                   <AdminOnly>
-                    <Button
-                      size="sm" variant="danger"
-                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(v); }}
-                    >
-                      Eliminar
-                    </Button>
+                    <div className="flex gap-1 justify-end">
+                      <Button
+                        size="sm" variant="ghost"
+                        onClick={(e) => { e.stopPropagation(); openEdit(v); }}
+                      >
+                        Editar
+                      </Button>
+                      <Button
+                        size="sm" variant="danger"
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(v); }}
+                      >
+                        Eliminar
+                      </Button>
+                    </div>
                   </AdminOnly>
                 ),
               },
@@ -204,6 +252,78 @@ export default function VentasPage() {
         loading={deleting}
         message={`¿Eliminar la venta #${deleteTarget?.numero}? El stock descontado no se revertirá automáticamente.`}
       />
+
+      {/* Modal editar venta (admin) */}
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title={`Editar venta #${editTarget?.numero}`}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Cliente</label>
+            <input
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="Mostrador"
+              value={editCliente}
+              onChange={(e) => setEditCliente(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Precios por producto</label>
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {editItems.map((item, idx) => (
+                <div key={item.id} className="flex items-center gap-3 p-3">
+                  <span className="flex-1 text-sm font-medium text-gray-800">{item.nombre}</span>
+                  <span className="text-sm font-mono text-gray-500">{item.kilos.toFixed(3)} kg</span>
+                  <div className="w-[120px]">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.precio_kg}
+                      onChange={(e) =>
+                        setEditItems((prev) => prev.map((x, i) => (i === idx ? { ...x, precio_kg: e.target.value } : x)))
+                      }
+                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                  <span className="w-[100px] text-right text-sm font-semibold text-gray-700">
+                    {formatMoneda(item.kilos * (parseFloat(item.precio_kg) || 0))}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Los kilos no se editan acá porque el stock ya fue descontado. Nuevo total:{" "}
+              <strong className="text-gray-700">
+                {formatMoneda(editItems.reduce((s, i) => s + i.kilos * (parseFloat(i.precio_kg) || 0), 0))}
+              </strong>
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas</label>
+            <textarea
+              rows={2}
+              value={editNotas}
+              onChange={(e) => setEditNotas(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={editSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} loading={editSaving}>
+              Guardar cambios
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal detalle venta */}
       <Modal

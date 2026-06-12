@@ -1,15 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Table } from "@/components/ui/Table";
+import { AdminOnly } from "@/components/ui/AdminOnly";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ElaboracionSupremasForm } from "@/components/produccion/ElaboracionSupremasForm";
 import { IniciarLoteSupremasForm } from "@/components/produccion/IniciarLoteSupremasForm";
 import { FinalizarLoteSupremasForm } from "@/components/produccion/FinalizarLoteSupremasForm";
-import { getElaboracionSupremas, getStock, getOrdenesElaboracionSupremas } from "@/lib/supabase/queries";
+import {
+  getElaboracionSupremas,
+  getStock,
+  getOrdenesElaboracionSupremas,
+  deleteElaboracionSupremas,
+  deleteOrdenElaboracionSupremas,
+} from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
 import { formatFechaHora, formatKilos, rendimientoColor } from "@/lib/utils";
 import type { ElaboracionSupremas, VStockActual, OrdenElaboracionSupremas } from "@/types";
@@ -35,6 +44,41 @@ export default function SupremasPage() {
 
   // Orden seleccionada para pesada o finalizar
   const [selectedOrden, setSelectedOrden]         = useState<OrdenElaboracionSupremas | null>(null);
+
+  // Eliminación admin
+  const [deletePesada, setDeletePesada] = useState<ElaboracionSupremas | null>(null);
+  const [deleteLote, setDeleteLote]     = useState<OrdenElaboracionSupremas | null>(null);
+  const [deleting, setDeleting]         = useState(false);
+
+  async function handleDeletePesada() {
+    if (!deletePesada) return;
+    setDeleting(true);
+    try {
+      await deleteElaboracionSupremas(deletePesada.id);
+      toast.success("Pesada eliminada");
+      setDeletePesada(null);
+      fetchData();
+    } catch (e: unknown) {
+      toast.error((e as Error).message ?? "Error al eliminar");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeleteLote() {
+    if (!deleteLote) return;
+    setDeleting(true);
+    try {
+      await deleteOrdenElaboracionSupremas(deleteLote.id);
+      toast.success("Lote eliminado");
+      setDeleteLote(null);
+      fetchData();
+    } catch (e: unknown) {
+      toast.error((e as Error).message ?? "Error al eliminar");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -360,6 +404,17 @@ export default function SupremasPage() {
                   header: "Operario",
                   render: (e) => e.operario?.nombre ?? "—",
                 },
+                {
+                  key: "acciones",
+                  header: "",
+                  render: (e) => (
+                    <AdminOnly>
+                      <Button size="sm" variant="danger" onClick={() => setDeletePesada(e)}>
+                        Eliminar
+                      </Button>
+                    </AdminOnly>
+                  ),
+                },
               ]}
             />
           </CardBody>
@@ -431,6 +486,17 @@ export default function SupremasPage() {
                   header: "Notas",
                   render: (o) => <span className="text-xs text-gray-500 block truncate max-w-xs">{o.notas || "—"}</span>,
                 },
+                {
+                  key: "acciones",
+                  header: "",
+                  render: (o) => (
+                    <AdminOnly>
+                      <Button size="sm" variant="danger" onClick={() => setDeleteLote(o)}>
+                        Eliminar
+                      </Button>
+                    </AdminOnly>
+                  ),
+                },
               ]}
             />
           </CardBody>
@@ -478,6 +544,22 @@ export default function SupremasPage() {
           />
         )}
       </Modal>
+
+      {/* Confirmaciones de borrado (admin) */}
+      <ConfirmDialog
+        open={!!deletePesada}
+        onClose={() => setDeletePesada(null)}
+        onConfirm={handleDeletePesada}
+        loading={deleting}
+        message="¿Eliminar esta pesada? El stock de supremas y filet que movió no se revertirá automáticamente; si corresponde, ajustalo desde la sección Stock."
+      />
+      <ConfirmDialog
+        open={!!deleteLote}
+        onClose={() => setDeleteLote(null)}
+        onConfirm={handleDeleteLote}
+        loading={deleting}
+        message="¿Eliminar este lote de elaboración? Las pesadas asociadas se conservarán como pesadas directas. El stock no se revertirá automáticamente."
+      />
     </div>
   );
 }

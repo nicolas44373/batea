@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table } from "@/components/ui/Table";
 import { Alert } from "@/components/ui/Alert";
 import { RegistroProduccionForm } from "@/components/produccion/RegistroProduccionForm";
-import { getOrdenes, getOrden, getProduccion, deleteProduccion } from "@/lib/supabase/queries";
+import { getOrdenes, getOrden, getProduccion, deleteProduccion, updateProduccion } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
 import { formatFechaHora, formatKilos, rendimientoColor, CORTES } from "@/lib/utils";
 import type { Produccion, OrdenDesposte } from "@/types";
@@ -30,6 +30,43 @@ function ProduccionContent() {
   const [deleting, setDeleting] = useState(false);
   const [detalleProduccion, setDetalleProduccion] = useState<Produccion | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+
+  // Edición admin de cortes
+  const [editTarget, setEditTarget] = useState<Produccion | null>(null);
+  const [editCortes, setEditCortes] = useState<Record<string, string>>({});
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEdit(p: Produccion) {
+    const cortes: Record<string, string> = {};
+    for (const c of CORTES) {
+      cortes[c.key] = ((p[c.key as keyof Produccion] as number) ?? 0).toString();
+    }
+    setEditCortes(cortes);
+    setEditTarget(p);
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget) return;
+    setEditSaving(true);
+    try {
+      await updateProduccion(editTarget.id, {
+        pata_muslo:       parseFloat(editCortes.pata_muslo) || 0,
+        pechuga:          parseFloat(editCortes.pechuga) || 0,
+        pechuga_con_piel: parseFloat(editCortes.pechuga_con_piel) || 0,
+        alitas:           parseFloat(editCortes.alitas) || 0,
+        carcasa:          parseFloat(editCortes.carcasa) || 0,
+        menudos:          parseFloat(editCortes.menudos) || 0,
+        pollo_entero:     parseFloat(editCortes.pollo_entero) || 0,
+      });
+      toast.success("Producción actualizada");
+      setEditTarget(null);
+      fetchData();
+    } catch (e: unknown) {
+      toast.error((e as Error).message ?? "Error al actualizar");
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -230,6 +267,9 @@ function ProduccionContent() {
                       Ver
                     </Button>
                     <AdminOnly>
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
+                        Editar
+                      </Button>
                       <Button size="sm" variant="danger" onClick={() => setDeleteTarget(p)}>
                         Eliminar
                       </Button>
@@ -249,6 +289,50 @@ function ProduccionContent() {
         loading={deleting}
         message="¿Eliminar este registro de producción? Los movimientos de stock asociados también se verán afectados."
       />
+
+      {/* Modal editar producción (admin) */}
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title="Editar producción"
+        size="md"
+      >
+        <div className="space-y-4">
+          <Alert variant="warning">
+            Corregir kilos acá no recalcula el stock automáticamente. Si la diferencia es importante,
+            ajustá el stock del producto desde la sección Stock (Ajuste manual).
+          </Alert>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {CORTES.map((c) => (
+              <div key={c.key}>
+                <label className="block text-xs font-medium text-gray-700 mb-1">{c.label} (kg)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={editCortes[c.key] ?? ""}
+                  onChange={(e) => setEditCortes((prev) => ({ ...prev, [c.key]: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-gray-600">
+            Nuevo total:{" "}
+            <strong>
+              {CORTES.reduce((s, c) => s + (parseFloat(editCortes[c.key]) || 0), 0).toFixed(3)} kg
+            </strong>
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={editSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} loading={editSaving}>
+              Guardar
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal detalle / impresión */}
       {detalleProduccion && (

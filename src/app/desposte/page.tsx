@@ -11,10 +11,10 @@ import { AdminOnly } from "@/components/ui/AdminOnly";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table } from "@/components/ui/Table";
 import { OrdenDesposteForm } from "@/components/desposte/OrdenDesposteForm";
-import { getOrdenes, deleteOrden } from "@/lib/supabase/queries";
+import { getOrdenes, deleteOrden, updateOrden, getUsuarios } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/client";
 import { ESTADO_COLORS, ESTADO_LABELS, formatFecha, formatKilos } from "@/lib/utils";
-import type { OrdenDesposte } from "@/types";
+import type { OrdenDesposte, OrdenEstado, Usuario } from "@/types";
 
 export default function DespostePage() {
   const [ordenes, setOrdenes] = useState<OrdenDesposte[]>([]);
@@ -23,6 +23,55 @@ export default function DespostePage() {
   const [userId, setUserId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<OrdenDesposte | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Edición admin
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [editTarget, setEditTarget] = useState<OrdenDesposte | null>(null);
+  const [editForm, setEditForm] = useState({
+    cantidad_cajones: "",
+    peso_estimado: "",
+    operario_id: "",
+    estado: "pendiente" as OrdenEstado,
+    notas: "",
+  });
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEdit(o: OrdenDesposte) {
+    setEditForm({
+      cantidad_cajones: o.cantidad_cajones.toString(),
+      peso_estimado: o.peso_estimado.toString(),
+      operario_id: o.operario_id ?? "",
+      estado: o.estado,
+      notas: o.notas ?? "",
+    });
+    setEditTarget(o);
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget) return;
+    const cajones = Number(editForm.cantidad_cajones);
+    if (!cajones || cajones <= 0) {
+      toast.error("Ingresá una cantidad de cajones válida");
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateOrden(editTarget.id, {
+        cantidad_cajones: cajones,
+        peso_estimado: Number(editForm.peso_estimado) || editTarget.peso_estimado,
+        operario_id: editForm.operario_id || undefined,
+        estado: editForm.estado,
+        notas: editForm.notas.trim() || undefined,
+      });
+      toast.success("Orden actualizada");
+      setEditTarget(null);
+      fetchOrdenes();
+    } catch (e: unknown) {
+      toast.error((e as Error).message ?? "Error al actualizar");
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -55,6 +104,7 @@ export default function DespostePage() {
       if (data.user) setUserId(data.user.id);
     });
     fetchOrdenes();
+    getUsuarios().then(setUsuarios).catch(() => {});
   }, [fetchOrdenes]);
 
   const pendientes = ordenes.filter((o) => o.estado === "pendiente").length;
@@ -154,6 +204,9 @@ export default function DespostePage() {
                       </Link>
                     ) : null}
                     <AdminOnly>
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
+                        Editar
+                      </Button>
                       <Button size="sm" variant="danger" onClick={() => setDeleteTarget(o)}>
                         Eliminar
                       </Button>
@@ -189,6 +242,79 @@ export default function DespostePage() {
         loading={deleting}
         message={`¿Eliminar la orden de desposte del ${deleteTarget?.fecha_orden ? formatFecha(deleteTarget.fecha_orden) : ""}? Esta acción no se puede deshacer.`}
       />
+
+      {/* Modal editar orden (admin) */}
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title="Editar orden de desposte"
+        size="sm"
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Cantidad de cajones</label>
+            <input
+              type="number"
+              min="1"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              value={editForm.cantidad_cajones}
+              onChange={(e) => setEditForm((f) => ({ ...f, cantidad_cajones: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Peso estimado (kg)</label>
+            <input
+              type="number"
+              step="0.1"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              value={editForm.peso_estimado}
+              onChange={(e) => setEditForm((f) => ({ ...f, peso_estimado: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Operario</label>
+            <select
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              value={editForm.operario_id}
+              onChange={(e) => setEditForm((f) => ({ ...f, operario_id: e.target.value }))}
+            >
+              <option value="">Sin asignar</option>
+              {usuarios.map((u) => (
+                <option key={u.id} value={u.id}>{u.nombre}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+            <select
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              value={editForm.estado}
+              onChange={(e) => setEditForm((f) => ({ ...f, estado: e.target.value as OrdenEstado }))}
+            >
+              {(["pendiente", "en_proceso", "completada", "cancelada"] as const).map((es) => (
+                <option key={es} value={es}>{ESTADO_LABELS[es]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas</label>
+            <textarea
+              rows={2}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              value={editForm.notas}
+              onChange={(e) => setEditForm((f) => ({ ...f, notas: e.target.value }))}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={editSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} loading={editSaving}>
+              Guardar
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

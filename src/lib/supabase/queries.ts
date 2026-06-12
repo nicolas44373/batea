@@ -370,9 +370,42 @@ export async function deleteLote(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function updateOrden(
+  id: string,
+  payload: Partial<Pick<OrdenDesposte, "cantidad_cajones" | "peso_estimado" | "operario_id" | "estado" | "notas">>
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("ordenes_desposte")
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
 export async function deleteOrden(id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("ordenes_desposte").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateProduccion(
+  id: string,
+  payload: Partial<Pick<Produccion, "pata_muslo" | "pechuga" | "pechuga_con_piel" | "alitas" | "carcasa" | "menudos" | "pollo_entero">>
+): Promise<void> {
+  const supabase = createClient();
+  const { pollo_entero, ...rest } = payload;
+
+  const updateNew: Record<string, unknown> = { ...rest };
+  if (pollo_entero !== undefined) updateNew.pollo_entero = pollo_entero;
+
+  let { error } = await supabase.from("produccion").update(updateNew).eq("id", id);
+
+  // Fallback a la columna legacy `otros` si la DB no tiene `pollo_entero`
+  if (error && isMissingPolloEnteroColumnError(error)) {
+    const updateLegacy: Record<string, unknown> = { ...rest };
+    if (pollo_entero !== undefined) updateLegacy.otros = pollo_entero;
+    ({ error } = await supabase.from("produccion").update(updateLegacy).eq("id", id));
+  }
   if (error) throw error;
 }
 
@@ -386,6 +419,40 @@ export async function deleteVenta(id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("ventas").delete().eq("id", id);
   if (error) throw error;
+}
+
+/**
+ * Edición admin de una venta: cliente, notas y precio por kg de cada ítem.
+ * Los kilos no se tocan para no desincronizar el stock ya descontado.
+ */
+export async function updateVentaConPrecios(
+  ventaId: string,
+  cabecera: { cliente?: string | null; notas?: string | null },
+  items: { id: string; kilos: number; precio_kg: number }[]
+): Promise<void> {
+  const supabase = createClient();
+
+  for (const item of items) {
+    // `subtotal` puede ser columna generada en algunas instalaciones: reintentar sin ella
+    let { error } = await supabase
+      .from("venta_items")
+      .update({ precio_kg: item.precio_kg, subtotal: item.kilos * item.precio_kg })
+      .eq("id", item.id);
+    if (error) {
+      ({ error } = await supabase
+        .from("venta_items")
+        .update({ precio_kg: item.precio_kg })
+        .eq("id", item.id));
+    }
+    if (error) throw error;
+  }
+
+  const totalMonto = items.reduce((s, i) => s + i.kilos * i.precio_kg, 0);
+  const { error: eVenta } = await supabase
+    .from("ventas")
+    .update({ cliente: cabecera.cliente ?? null, notas: cabecera.notas ?? null, total_monto: totalMonto })
+    .eq("id", ventaId);
+  if (eVenta) throw eVenta;
 }
 
 export async function getUsuariosAll(): Promise<Usuario[]> {
@@ -450,6 +517,24 @@ export async function insertElaboracionSupremas(
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function deleteElaboracionSupremas(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("elaboracion_supremas").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteOrdenElaboracionSupremas(id: string): Promise<void> {
+  const supabase = createClient();
+  // Desvincular pesadas asociadas para no perder el historial de elaboraciones
+  const { error: eUnlink } = await supabase
+    .from("elaboracion_supremas")
+    .update({ orden_elaboracion_id: null })
+    .eq("orden_elaboracion_id", id);
+  if (eUnlink) throw eUnlink;
+  const { error } = await supabase.from("ordenes_elaboracion_supremas").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function getOrdenesElaboracionSupremas(): Promise<OrdenElaboracionSupremas[]> {
@@ -882,5 +967,37 @@ export async function insertRemito(
   }
 
   return remito;
+}
+
+export async function updateRemito(
+  id: string,
+  payload: Partial<Pick<Remito, "proveedor_id" | "numero_remito" | "fecha" | "notas">>
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("remitos")
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateRemitoItem(
+  id: string,
+  payload: { kilos: number; precio_costo?: number | null; costo_total?: number | null }
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("remito_items")
+    .update(payload)
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteRemito(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error: eItems } = await supabase.from("remito_items").delete().eq("remito_id", id);
+  if (eItems) throw eItems;
+  const { error } = await supabase.from("remitos").delete().eq("id", id);
+  if (error) throw error;
 }
 

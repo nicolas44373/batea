@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
-import { getProductoPorPlu, getStock, insertVenta } from "@/lib/supabase/queries";
+import { getProductoPorPlu, getProductos, getStock, insertVenta } from "@/lib/supabase/queries";
 import { formatKilos, formatMoneda, resolverScanBalanza, getProductoLabel } from "@/lib/utils";
 import type { Producto, VStockActual } from "@/types";
 
@@ -30,6 +30,7 @@ interface VentaFormProps {
 
 export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
   const [stock, setStock]         = useState<VStockActual[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
   const [cart, setCart]           = useState<CartItem[]>([]);
   const [cliente, setCliente]     = useState("");
   const [notas, setNotas]         = useState("");
@@ -53,6 +54,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
 
   useEffect(() => {
     getStock().then(setStock);
+    getProductos().then(setProductos).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -498,7 +500,9 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                   key={s.producto_id}
                   type="button"
                   onClick={() => {
-                    const prod: Producto = {
+                    // Usar el producto real (con precio_venta, precio_fijo y PLU);
+                    // el objeto mínimo es solo un respaldo si aún no cargó la lista.
+                    const prod: Producto = productos.find((p) => p.id === s.producto_id) ?? {
                       id: s.producto_id,
                       nombre: s.producto,
                       unidad: "kg",
@@ -507,7 +511,7 @@ export function VentaForm({ usuarioId, onSuccess }: VentaFormProps) {
                     };
                     setScanResult(prod);
                     setScanKilos("");
-                    setScanPrecio("");
+                    setScanPrecio(prod.precio_venta?.toString() ?? "");
                     setScannerMode(true);
                   }}
                   className={`flex flex-col text-left p-3 rounded-lg border transition-all

@@ -1,11 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { getProveedores, getProductos, getRemitos, insertRemito } from "@/lib/supabase/queries";
-import { formatFechaHora, formatKilos, getProductoLabel } from "@/lib/utils";
+import { Modal } from "@/components/ui/Modal";
+import { AdminOnly } from "@/components/ui/AdminOnly";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  getProveedores,
+  getProductos,
+  getRemitos,
+  insertRemito,
+  updateRemito,
+  updateRemitoItem,
+  deleteRemito,
+} from "@/lib/supabase/queries";
+import { formatFechaHora, getProductoLabel } from "@/lib/utils";
 import { useCurrentUser } from "@/context/UserContext";
 import type { Proveedor, Producto, Remito } from "@/types";
 
@@ -35,6 +46,27 @@ export default function RemitosPage() {
   const [lineas, setLineas]             = useState<ItemLinea[]>([
     { producto_id: "", kilos: "", precio_costo: "", costo_total: "" }
   ]);
+
+  // Edición / eliminación (admin)
+  const [editTarget, setEditTarget]     = useState<Remito | null>(null);
+  const [editCabecera, setEditCabecera] = useState({ proveedor_id: "", numero_remito: "", notas: "" });
+  const [editItems, setEditItems]       = useState<{ id: string; producto_nombre: string; kilos: string; precio_costo: string }[]>([]);
+  const [editSaving, setEditSaving]     = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Remito | null>(null);
+  const [deleting, setDeleting]         = useState(false);
+
+  // Último precio de costo cargado por producto (remitos ya vienen ordenados por fecha desc)
+  const ultimoCostoPorProducto = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of remitos) {
+      for (const item of r.items ?? []) {
+        if (!map.has(item.producto_id) && item.precio_costo && item.precio_costo > 0) {
+          map.set(item.producto_id, item.precio_costo);
+        }
+      }
+    }
+    return map;
+  }, [remitos]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -77,13 +109,17 @@ export default function RemitosPage() {
       prev.map((item, i) => {
         if (i !== idx) return item;
         const updated = { ...item, [field]: val };
-        
-        // Calcular costo total si cambia kilos (unidades) o precio_costo
-        if (field === "kilos" || field === "precio_costo") {
-          const qty = parseFloat(updated.kilos) || 0;
-          const cost = parseFloat(updated.precio_costo) || 0;
-          updated.costo_total = (qty * cost).toFixed(2);
+
+        // Al elegir producto, autocompletar con el último costo cargado para no re-tipearlo
+        if (field === "producto_id" && val) {
+          const ultimo = ultimoCostoPorProducto.get(val);
+          if (ultimo) updated.precio_costo = ultimo.toString();
         }
+
+        // Calcular costo total si cambia producto, kilos (unidades) o precio_costo
+        const qty = parseFloat(updated.kilos) || 0;
+        const cost = parseFloat(updated.precio_costo) || 0;
+        updated.costo_total = (qty * cost).toFixed(2);
         return updated;
       })
     );
@@ -145,6 +181,71 @@ export default function RemitosPage() {
       toast.error(err instanceof Error ? err.message : "Error al registrar remito");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEdit = (r: Remito) => {
+    setEditCabecera({
+      proveedor_id: r.proveedor_id,
+      numero_remito: r.numero_remito,
+      notas: r.notas ?? "",
+    });
+    setEditItems(
+      (r.items ?? []).map((item) => ({
+        id: item.id,
+        producto_nombre: item.producto?.nombre ? getProductoLabel(item.producto.nombre) : "—",
+        kilos: item.kilos.toString(),
+        precio_costo: item.precio_costo?.toString() ?? "",
+      }))
+    );
+    setEditTarget(r);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editTarget) return;
+    if (!editCabecera.numero_remito.trim()) {
+      toast.error("El número de remito no puede quedar vacío");
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateRemito(editTarget.id, {
+        proveedor_id: editCabecera.proveedor_id,
+        numero_remito: editCabecera.numero_remito.trim(),
+        notas: editCabecera.notas.trim() || undefined,
+      });
+      for (const item of editItems) {
+        const kilos = parseFloat(item.kilos);
+        if (!kilos || kilos <= 0) continue;
+        const precio = item.precio_costo ? parseFloat(item.precio_costo) : null;
+        await updateRemitoItem(item.id, {
+          kilos,
+          precio_costo: precio,
+          costo_total: precio ? kilos * precio : null,
+        });
+      }
+      toast.success("Remito actualizado");
+      setEditTarget(null);
+      fetchData();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al actualizar remito");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteRemito = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteRemito(deleteTarget.id);
+      toast.success(`Remito N° ${deleteTarget.numero_remito} eliminado`);
+      setDeleteTarget(null);
+      fetchData();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar remito");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -303,6 +404,11 @@ export default function RemitosPage() {
                       onChange={(e) => handleLineaChange(idx, "precio_costo", e.target.value)}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
+                    {linea.producto_id && ultimoCostoPorProducto.has(linea.producto_id) && (
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Último: ${ultimoCostoPorProducto.get(linea.producto_id)!.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                      </p>
+                    )}
                   </div>
 
                   {/* Costo Total */}
@@ -370,9 +476,19 @@ export default function RemitosPage() {
                 <Card key={r.id}>
                   <CardHeader
                     actions={
-                      <span className="text-xs text-gray-400">
-                        Registrado: {formatFechaHora(r.fecha)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">
+                          Registrado: {formatFechaHora(r.fecha)}
+                        </span>
+                        <AdminOnly>
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
+                            Editar
+                          </Button>
+                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(r)}>
+                            Eliminar
+                          </Button>
+                        </AdminOnly>
+                      </div>
                     }
                   >
                     Remito N° {r.numero_remito} — {r.proveedor?.nombre ?? "Proveedor desconocido"}
@@ -433,6 +549,113 @@ export default function RemitosPage() {
           )}
         </div>
       )}
+
+      {/* Modal editar remito (admin) */}
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title={`Editar Remito N° ${editTarget?.numero_remito ?? ""}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Proveedor</label>
+              <select
+                value={editCabecera.proveedor_id}
+                onChange={(e) => setEditCabecera((f) => ({ ...f, proveedor_id: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              >
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Número de Remito</label>
+              <input
+                type="text"
+                value={editCabecera.numero_remito}
+                onChange={(e) => setEditCabecera((f) => ({ ...f, numero_remito: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Productos</label>
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {editItems.map((item, idx) => (
+                <div key={item.id} className="flex items-center gap-3 p-3 flex-wrap sm:flex-nowrap">
+                  <span className="flex-1 min-w-[140px] text-sm font-medium text-gray-800">
+                    {item.producto_nombre}
+                  </span>
+                  <div className="w-[110px]">
+                    <label className="block text-[11px] text-gray-500">Unidades</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={item.kilos}
+                      onChange={(e) =>
+                        setEditItems((prev) => prev.map((x, i) => (i === idx ? { ...x, kilos: e.target.value } : x)))
+                      }
+                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div className="w-[130px]">
+                    <label className="block text-[11px] text-gray-500">Costo ($/unidad)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.precio_costo}
+                      onChange={(e) =>
+                        setEditItems((prev) => prev.map((x, i) => (i === idx ? { ...x, precio_costo: e.target.value } : x)))
+                      }
+                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div className="w-[110px] text-right text-sm font-mono text-gray-600">
+                    ${((parseFloat(item.kilos) || 0) * (parseFloat(item.precio_costo) || 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-amber-600 mt-1">
+              Modificar unidades no recalcula el stock automáticamente. Si cambiás cantidades, ajustá el stock desde la sección Stock.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas</label>
+            <textarea
+              rows={2}
+              value={editCabecera.notas}
+              onChange={(e) => setEditCabecera((f) => ({ ...f, notas: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={editSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} loading={editSaving}>
+              Guardar cambios
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Confirmación de borrado (admin) */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteRemito}
+        loading={deleting}
+        message={`¿Eliminar el remito N° ${deleteTarget?.numero_remito}? El stock que sumó este remito no se revertirá automáticamente; si corresponde, ajustalo desde la sección Stock.`}
+      />
     </div>
   );
 }
